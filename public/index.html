@@ -1,0 +1,2600 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>門市排班系統 v2.7</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --bg: #0f1117;
+  --bg2: #181b24;
+  --bg3: #1e222e;
+  --bg4: #262b3a;
+  --text: #e8eaf0;
+  --text2: #9aa0b4;
+  --text3: #636a80;
+  --accent: #5b8def;
+  --accent2: #4a7de0;
+  --store1: #5b8def;
+  --store1bg: rgba(91,141,239,0.12);
+  --store2: #e8a84c;
+  --store2bg: rgba(232,168,76,0.12);
+  --store3: #6fcf97;
+  --store3bg: rgba(111,207,151,0.12);
+  --store4: #a78bfa;
+  --store4bg: rgba(167,139,250,0.12);
+  --store5: #f472b6;
+  --store5bg: rgba(244,114,182,0.12);
+  --store6: #22d3ee;
+  --store6bg: rgba(34,211,238,0.12);
+  --store7: #fb923c;
+  --store7bg: rgba(251,146,60,0.12);
+  --store8: #a3e635;
+  --store8bg: rgba(163,230,53,0.12);
+  --danger: #ef5b5b;
+  --dangerbg: rgba(239,91,91,0.1);
+  --warn: #e8a84c;
+  --warnbg: rgba(232,168,76,0.1);
+  --success: #6fcf97;
+  --successbg: rgba(111,207,151,0.1);
+  --border: rgba(255,255,255,0.06);
+  --shadow: 0 2px 12px rgba(0,0,0,0.3);
+  --radius: 10px;
+}
+
+body.light-mode {
+  --bg: #f4f5f7;
+  --bg2: #ffffff;
+  --bg3: #eef0f4;
+  --bg4: #e2e5ec;
+  --text: #1a1d2e;
+  --text2: #4a5068;
+  --text3: #8b90a8;
+  --accent: #3a6fd8;
+  --accent2: #2f5ec4;
+  --store1: #3a6fd8;
+  --store1bg: rgba(58,111,216,0.10);
+  --store2: #c47d1a;
+  --store2bg: rgba(196,125,26,0.10);
+  --store3: #2a9b63;
+  --store3bg: rgba(42,155,99,0.10);
+  --store4: #7c3aed;
+  --store4bg: rgba(124,58,237,0.10);
+  --store5: #db2777;
+  --store5bg: rgba(219,39,119,0.10);
+  --store6: #0891b2;
+  --store6bg: rgba(8,145,178,0.10);
+  --store7: #ea580c;
+  --store7bg: rgba(234,88,12,0.10);
+  --store8: #65a30d;
+  --store8bg: rgba(101,163,13,0.10);
+  --danger: #d63838;
+  --dangerbg: rgba(214,56,56,0.09);
+  --warn: #c47d1a;
+  --warnbg: rgba(196,125,26,0.09);
+  --success: #2a9b63;
+  --successbg: rgba(42,155,99,0.09);
+  --border: rgba(0,0,0,0.08);
+  --shadow: 0 2px 12px rgba(0,0,0,0.1);
+}
+
+/* Theme toggle button */
+.theme-toggle {
+  display:flex; align-items:center; gap:6px;
+  padding:7px 14px; border-radius:20px; font-size:12px; font-weight:500;
+  cursor:pointer; border:1px solid var(--border);
+  background:var(--bg3); color:var(--text2);
+  transition:all .25s; font-family:inherit;
+  white-space:nowrap;
+}
+.theme-toggle:hover { background:var(--bg4); color:var(--text); }
+.theme-toggle .toggle-icon { font-size:15px; transition:transform .3s; }
+body.light-mode .theme-toggle .toggle-icon { transform:rotate(180deg); }
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  font-family: 'Noto Sans TC', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--bg4); border-radius:3px; }
+
+/* Layout */
+.app { max-width:1440px; margin:0 auto; padding:20px; }
+
+.header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:16px 0 24px; border-bottom:1px solid var(--border); margin-bottom:24px;
+}
+.header h1 {
+  font-size:22px; font-weight:600; letter-spacing:-0.5px;
+  display:flex; align-items:center; gap:10px;
+}
+.header h1 span { color:var(--accent); }
+.header-actions { display:flex; gap:8px; }
+
+/* Tabs */
+.tabs {
+  display:flex; gap:4px; background:var(--bg2); border-radius:var(--radius);
+  padding:4px; margin-bottom:24px; width:fit-content;
+}
+.tab {
+  padding:8px 20px; border-radius:8px; cursor:pointer;
+  font-size:13px; font-weight:500; color:var(--text2);
+  transition:all .2s; border:none; background:none;
+}
+.tab:hover { color:var(--text); }
+.tab.active { background:var(--bg4); color:var(--text); }
+
+/* Cards */
+.card {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:var(--radius); padding:20px; margin-bottom:16px;
+}
+.card-title {
+  font-size:14px; font-weight:600; margin-bottom:16px;
+  display:flex; align-items:center; gap:8px;
+}
+.card-title .dot { width:8px; height:8px; border-radius:50%; }
+
+/* Grid layout */
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
+.grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+
+/* Form elements */
+label { font-size:12px; color:var(--text2); margin-bottom:4px; display:block; }
+input, select {
+  width:100%; padding:8px 12px; background:var(--bg3); border:1px solid var(--border);
+  border-radius:6px; color:var(--text); font-size:13px; font-family:inherit;
+  outline:none; transition:border .2s;
+}
+input:focus, select:focus { border-color:var(--accent); }
+input[type="number"] { font-family:'JetBrains Mono', monospace; }
+
+.btn {
+  padding:8px 16px; border-radius:6px; font-size:13px; font-weight:500;
+  cursor:pointer; border:none; transition:all .2s; font-family:inherit;
+  display:inline-flex; align-items:center; gap:6px;
+}
+.btn-primary { background:var(--accent); color:#fff; }
+.btn-primary:hover { background:var(--accent2); }
+.btn-ghost { background:transparent; color:var(--text2); border:1px solid var(--border); }
+.btn-ghost:hover { background:var(--bg3); color:var(--text); }
+.btn-danger { background:var(--dangerbg); color:var(--danger); }
+.btn-danger:hover { background:rgba(239,91,91,0.2); }
+.btn-sm { padding:5px 10px; font-size:12px; }
+.btn-lg { padding:10px 24px; font-size:14px; }
+
+/* Tags */
+.tag {
+  display:inline-flex; align-items:center; padding:3px 10px;
+  border-radius:20px; font-size:11px; font-weight:500;
+}
+.tag-store1 { background:var(--store1bg); color:var(--store1); }
+.tag-store2 { background:var(--store2bg); color:var(--store2); }
+.tag-store3 { background:var(--store3bg); color:var(--store3); }
+.tag-store4 { background:var(--store4bg); color:var(--store4); }
+.tag-store5 { background:var(--store5bg); color:var(--store5); }
+.tag-store6 { background:var(--store6bg); color:var(--store6); }
+.tag-store7 { background:var(--store7bg); color:var(--store7); }
+.tag-store8 { background:var(--store8bg); color:var(--store8); }
+
+/* Table */
+table { width:100%; border-collapse:collapse; }
+th {
+  text-align:left; padding:10px 12px; font-size:11px; font-weight:600;
+  color:var(--text3); text-transform:uppercase; letter-spacing:0.5px;
+  border-bottom:1px solid var(--border);
+}
+td {
+  padding:8px 12px; font-size:13px; border-bottom:1px solid var(--border);
+}
+tr:hover td { background:rgba(255,255,255,0.02); }
+
+/* Schedule Grid */
+.schedule-grid {
+  display:grid; gap:0; overflow-x:auto; font-size:12px;
+}
+.sg-header {
+  position:sticky; top:0; background:var(--bg2); z-index:2;
+  display:contents;
+}
+.sg-cell {
+  padding:6px 8px; border:1px solid var(--border);
+  min-width:44px; text-align:center; font-size:11px;
+  transition:background .15s;
+}
+.sg-cell.header-cell {
+  background:var(--bg3); font-weight:600; color:var(--text2);
+  position:sticky; top:0; z-index:2;
+}
+.sg-cell.name-cell {
+  background:var(--bg3); font-weight:500; text-align:left;
+  position:sticky; left:0; z-index:3; min-width:80px;
+  white-space:nowrap;
+}
+.sg-cell.name-cell.header-cell { z-index:4; }
+.sg-cell.available { background:rgba(111,207,151,0.08); cursor:pointer; }
+.sg-cell.available:hover { background:rgba(111,207,151,0.18); }
+.sg-cell.assigned {
+  font-weight:600; cursor:pointer;
+}
+.sg-cell.assigned.store1 { background:var(--store1bg); color:var(--store1); }
+.sg-cell.assigned.store2 { background:var(--store2bg); color:var(--store2); }
+.sg-cell.assigned.store3 { background:var(--store3bg); color:var(--store3); }
+.sg-cell.assigned.store4 { background:var(--store4bg); color:var(--store4); }
+.sg-cell.assigned.store5 { background:var(--store5bg); color:var(--store5); }
+.sg-cell.assigned.store6 { background:var(--store6bg); color:var(--store6); }
+.sg-cell.assigned.store7 { background:var(--store7bg); color:var(--store7); }
+.sg-cell.assigned.store8 { background:var(--store8bg); color:var(--store8); }
+.sg-cell.unavailable { background:var(--bg); color:var(--text3); }
+.sg-cell.conflict { background:var(--dangerbg); color:var(--danger); }
+
+.sg-cell .shift-label { font-size:10px; }
+
+/* Day of week colors */
+.dow-sat { color:var(--store2); }
+.dow-sun { color:var(--danger); }
+
+/* Modal */
+.modal-overlay {
+  position:fixed; top:0; left:0; right:0; bottom:0;
+  background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);
+  z-index:100; display:flex; align-items:center; justify-content:center;
+  animation:fadeIn .2s;
+}
+.modal {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:12px; padding:24px; min-width:420px; max-width:90vw;
+  max-height:85vh; overflow-y:auto; animation:slideUp .25s;
+}
+.modal h2 { font-size:16px; font-weight:600; margin-bottom:16px; }
+@keyframes fadeIn { from{opacity:0} to{opacity:1} }
+@keyframes slideUp { from{transform:translateY(20px);opacity:0} to{transform:translateY(0);opacity:1} }
+
+/* Availability checkbox grid */
+.avail-grid {
+  display:grid; grid-template-columns:auto repeat(7,1fr);
+  gap:2px; font-size:11px;
+}
+.avail-grid .ag-header { font-weight:600; color:var(--text2); text-align:center; padding:4px; }
+.avail-grid .ag-week { color:var(--text3); padding:4px; text-align:right; font-size:10px; }
+.avail-grid .ag-cell {
+  width:32px; height:28px; border-radius:4px; cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+  transition:all .15s; font-size:10px;
+}
+.avail-grid .ag-cell.on { background:var(--successbg); color:var(--success); }
+.avail-grid .ag-cell.off { background:var(--bg); color:var(--text3); }
+.avail-grid .ag-cell:hover { opacity:0.8; }
+
+/* Stats bar */
+.stats-bar {
+  display:flex; gap:16px; flex-wrap:wrap; margin-bottom:20px;
+}
+.stat-item {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:var(--radius); padding:14px 20px; flex:1; min-width:150px;
+}
+.stat-value {
+  font-size:24px; font-weight:700; font-family:'JetBrains Mono', monospace;
+}
+.stat-label { font-size:11px; color:var(--text2); margin-top:2px; }
+
+/* Print */
+@media print {
+  body { background:#fff; color:#000; }
+  .no-print { display:none !important; }
+  .card { border:1px solid #ddd; }
+  .sg-cell.assigned.store1,
+  .sg-cell.assigned.store2,
+  .sg-cell.assigned.store3,
+  .sg-cell.assigned.store4,
+  .sg-cell.assigned.store5,
+  .sg-cell.assigned.store6,
+  .sg-cell.assigned.store7,
+  .sg-cell.assigned.store8 { color:#000 !important; }
+}
+
+/* Tooltip */
+.tooltip {
+  position:relative;
+}
+.tooltip::after {
+  content:attr(data-tip); position:absolute; bottom:100%; left:50%;
+  transform:translateX(-50%); padding:4px 8px; background:var(--bg4);
+  border-radius:4px; font-size:11px; white-space:nowrap;
+  opacity:0; pointer-events:none; transition:opacity .2s;
+}
+.tooltip:hover::after { opacity:1; }
+
+/* Violation badge */
+.violation {
+  display:inline-flex; align-items:center; gap:4px;
+  padding:3px 8px; border-radius:4px; font-size:11px;
+  background:var(--dangerbg); color:var(--danger);
+}
+
+/* Section */
+.section { margin-bottom:24px; }
+.section-title {
+  font-size:13px; font-weight:600; color:var(--text2);
+  margin-bottom:12px; text-transform:uppercase; letter-spacing:0.5px;
+}
+
+/* Checkbox */
+.checkbox-row {
+  display:flex; align-items:center; gap:8px; padding:4px 0;
+}
+.checkbox-row input[type="checkbox"] {
+  width:16px; height:16px; accent-color:var(--accent);
+}
+
+/* Store config row */
+.store-config-row {
+  display:flex; align-items:center; gap:12px; padding:10px 0;
+  border-bottom:1px solid var(--border);
+}
+.store-config-row:last-child { border:none; }
+
+.toggle-group {
+  display:flex; gap:2px; background:var(--bg); border-radius:6px; padding:2px;
+}
+.toggle-opt {
+  padding:4px 12px; border-radius:4px; font-size:11px;
+  cursor:pointer; transition:all .2s; color:var(--text3);
+  border:none; background:none; font-family:inherit;
+}
+.toggle-opt.active { background:var(--bg4); color:var(--text); }
+
+/* Person list in sidebar */
+.person-row {
+  display:flex; align-items:center; gap:8px; padding:8px 10px;
+  border-radius:6px; cursor:pointer; transition:background .15s;
+}
+.person-row:hover { background:var(--bg3); }
+.person-avatar {
+  width:28px; height:28px; border-radius:50%; background:var(--bg4);
+  display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:600;
+}
+.person-name { font-size:13px; flex:1; }
+.person-shifts { font-size:11px; color:var(--text3); font-family:'JetBrains Mono', monospace; }
+
+/* Two column layout */
+.layout-main {
+  display:grid; grid-template-columns:260px 1fr; gap:20px;
+}
+@media(max-width:900px) { .layout-main { grid-template-columns:1fr; } }
+
+/* Shift cell content */
+.shift-content {
+  display:flex; flex-direction:column; align-items:center; gap:1px;
+}
+.shift-store { font-weight:700; font-size:11px; }
+.shift-type { font-size:9px; opacity:0.7; }
+
+/* Quick actions */
+.quick-actions {
+  display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;
+}
+
+/* empty state */
+.empty-state {
+  text-align:center; padding:40px; color:var(--text3);
+}
+.empty-state .icon { font-size:32px; margin-bottom:8px; }
+
+/* Conflict pair */
+.conflict-pair {
+  display:flex; align-items:center; gap:10px; padding:10px 14px;
+  background:var(--bg3); border-radius:8px; border-left:3px solid var(--danger);
+}
+.conflict-pair .names {
+  flex:1; font-size:13px; font-weight:500;
+}
+.conflict-pair .vs {
+  color:var(--danger); font-size:11px; font-weight:700; padding:0 4px;
+}
+.conflict-add-row {
+  display:flex; gap:8px; align-items:flex-end;
+}
+.conflict-add-row select {
+  flex:1;
+}
+
+/* Legend */
+.legend {
+  display:flex; gap:16px; flex-wrap:wrap; font-size:11px; color:var(--text2);
+  padding:8px 0;
+}
+.legend-item { display:flex; align-items:center; gap:4px; }
+.legend-dot {
+  width:12px; height:12px; border-radius:3px;
+}
+</style>
+</head>
+<body>
+<div class="app" id="app"></div>
+
+<script>
+// ============================================================
+// DATA MODEL
+// ============================================================
+
+const DEFAULT_STORES = [
+  { id:'taipei', name:'台北車站', short:'北車', color:'store1' },
+  { id:'zhongshan', name:'中山誠品', short:'中山', color:'store2' },
+  { id:'songyan', name:'松菸誠品', short:'松菸', color:'store3' },
+];
+
+// Color palette for dynamic stores (dark / light hex values)
+const COLOR_MAP = {
+  store1: { dark:{ main:'#5b8def', bg:'rgba(91,141,239,0.18)',   text:'#b8d0ff' }, light:{ main:'#3a6fd8', bg:'rgba(58,111,216,0.13)',   text:'#1a3a7a' } },
+  store2: { dark:{ main:'#e8a84c', bg:'rgba(232,168,76,0.18)',   text:'#ffe0a0' }, light:{ main:'#c47d1a', bg:'rgba(196,125,26,0.13)',   text:'#6b3d00' } },
+  store3: { dark:{ main:'#6fcf97', bg:'rgba(111,207,151,0.18)',  text:'#b2f0ce' }, light:{ main:'#2a9b63', bg:'rgba(42,155,99,0.13)',    text:'#0d4f30' } },
+  store4: { dark:{ main:'#a78bfa', bg:'rgba(167,139,250,0.18)',  text:'#ddd6fe' }, light:{ main:'#7c3aed', bg:'rgba(124,58,237,0.13)',   text:'#4c1d95' } },
+  store5: { dark:{ main:'#f472b6', bg:'rgba(244,114,182,0.18)',  text:'#fbcfe8' }, light:{ main:'#db2777', bg:'rgba(219,39,119,0.13)',   text:'#831843' } },
+  store6: { dark:{ main:'#22d3ee', bg:'rgba(34,211,238,0.18)',   text:'#a5f3fc' }, light:{ main:'#0891b2', bg:'rgba(8,145,178,0.13)',    text:'#164e63' } },
+  store7: { dark:{ main:'#fb923c', bg:'rgba(251,146,60,0.18)',   text:'#fed7aa' }, light:{ main:'#ea580c', bg:'rgba(234,88,12,0.13)',    text:'#7c2d12' } },
+  store8: { dark:{ main:'#a3e635', bg:'rgba(163,230,53,0.18)',   text:'#d9f99d' }, light:{ main:'#65a30d', bg:'rgba(101,163,13,0.13)',   text:'#365314' } },
+};
+const COLOR_PALETTE = ['store1','store2','store3','store4','store5','store6','store7','store8'];
+
+let STORES = [...DEFAULT_STORES];
+
+const SHIFT_TYPES = {
+  FULL: { id:'FULL', label:'整日', short:'全' },
+  AM:   { id:'AM',   label:'早班', short:'早' },
+  PM:   { id:'PM',   label:'晚班', short:'晚' },
+};
+
+const DEFAULT_STATE = {
+  year: new Date().getFullYear(),
+  month: new Date().getMonth() + 1,
+  stores: [...DEFAULT_STORES],
+  employees: [],
+  storeSettings: {
+    taipei:    { defaultShiftType:'FULL', defaultStaff:1, dailyOverrides:{} },
+    zhongshan: { defaultShiftType:'FULL', defaultStaff:1, dailyOverrides:{} },
+    songyan:   { defaultShiftType:'FULL', defaultStaff:1, dailyOverrides:{} },
+  },
+  constraints: {
+    maxConsecutive: 6,
+    defaultMinShifts: 8,
+    defaultMaxShifts: 16,
+  },
+  assignments: {},  // "YYYY-MM-DD_storeId_shiftType": [empId, ...]
+  conflictPairs: [], // [[empId1, empId2], ...]
+  tab: 'schedule',
+};
+
+let state = { ...DEFAULT_STATE };
+let currentUser = { email: '', name: '' };
+let _saveTimer = null;
+let _saving = false;
+let _lastSaveTime = 0;
+let _useLocalFallback = false; // true when running locally without Pages Functions
+let _savePromise = null; // tracks in-flight API save
+
+// ── Store sync ───────────────────────────────────────────────
+
+function syncStores() {
+  if (state.stores && state.stores.length > 0) {
+    STORES = state.stores;
+  } else {
+    state.stores = [...DEFAULT_STORES];
+    STORES = state.stores;
+  }
+  // Ensure every store has a storeSettings entry
+  for (const s of STORES) {
+    if (!state.storeSettings[s.id]) {
+      state.storeSettings[s.id] = { defaultShiftType:'FULL', defaultStaff:1, dailyOverrides:{} };
+    }
+  }
+}
+
+// ── API helpers ──────────────────────────────────────────────
+
+function monthKey() {
+  return `${state.year}-${String(state.month).padStart(2,'0')}`;
+}
+
+// localStorage fallback keys (used when API unavailable)
+const LS_GLOBAL = 'shiftScheduler_global';
+const LS_MONTH  = (mk) => `shiftScheduler_month_${mk}`;
+
+function loadStateFromLocalStorage() {
+  try {
+    const globalRaw = localStorage.getItem(LS_GLOBAL);
+    const monthRaw  = localStorage.getItem(LS_MONTH(monthKey()));
+    const globalData = globalRaw ? JSON.parse(globalRaw) : {};
+    const monthData  = monthRaw  ? JSON.parse(monthRaw)  : {};
+    const merged = { ...DEFAULT_STATE, ...globalData, ...monthData };
+    if (!merged.storeSettings) merged.storeSettings = DEFAULT_STATE.storeSettings;
+    if (!merged.constraints)   merged.constraints   = DEFAULT_STATE.constraints;
+    if (!merged.assignments)   merged.assignments   = {};
+    if (!merged.conflictPairs) merged.conflictPairs = [];
+    state = merged;
+    syncStores();
+  } catch(e) {}
+}
+
+function saveStateToLocalStorage() {
+  try {
+    const { assignments, year, month, tab, ...globalPart } = state;
+    localStorage.setItem(LS_GLOBAL, JSON.stringify(globalPart));
+    localStorage.setItem(LS_MONTH(monthKey()), JSON.stringify({ assignments: assignments || {} }));
+  } catch(e) {}
+}
+
+async function loadState() {
+  if (_useLocalFallback) {
+    loadStateFromLocalStorage();
+    return;
+  }
+  try {
+    const res = await fetch(`/api/state?month=${monthKey()}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { data } = await res.json();
+    if (data) {
+      if (!data.storeSettings) data.storeSettings = DEFAULT_STATE.storeSettings;
+      if (!data.constraints)   data.constraints   = DEFAULT_STATE.constraints;
+      if (!data.assignments)   data.assignments   = {};
+      if (!data.conflictPairs) data.conflictPairs = [];
+      state = { ...DEFAULT_STATE, ...data };
+      syncStores();
+    }
+  } catch(e) {
+    // API not reachable → switch to localStorage fallback permanently
+    _useLocalFallback = true;
+    console.warn('API unavailable, switching to localStorage fallback:', e.message);
+    loadStateFromLocalStorage();
+  }
+}
+
+async function saveState() {
+  if (_useLocalFallback) {
+    saveStateToLocalStorage();
+    setSaveIndicator('local');
+    return;
+  }
+  // Debounce: coalesce rapid saves into one request 400ms later
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(async () => {
+    await _doSaveToAPI();
+  }, 400);
+}
+
+// Immediately upload state to API (no debounce). Returns a Promise.
+async function saveStateImmediate() {
+  if (_useLocalFallback) {
+    saveStateToLocalStorage();
+    setSaveIndicator('local');
+    return;
+  }
+  // Cancel any pending debounced save first
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+  await _doSaveToAPI();
+}
+
+async function _doSaveToAPI() {
+  _saving = true;
+  setSaveIndicator('saving');
+  setRefreshBtnDisabled(true);
+  const p = (async () => {
+    try {
+      const res = await fetch(`/api/state?month=${monthKey()}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(state),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      _lastSaveTime = Date.now();
+      setSaveIndicator('saved');
+    } catch(e) {
+      console.error('saveState failed:', e);
+      setSaveIndicator('error');
+    } finally {
+      _saving = false;
+      _savePromise = null;
+      setRefreshBtnDisabled(false);
+    }
+  })();
+  _savePromise = p;
+  await p;
+}
+
+function setRefreshBtnDisabled(disabled) {
+  const btn = document.getElementById('syncBtn');
+  if (btn) btn.disabled = disabled;
+}
+
+function setSaveIndicator(status) {
+  const el = document.getElementById('saveIndicator');
+  if (!el) return;
+  if (status === 'saving') {
+    el.textContent = '⏳ 儲存中…';
+    el.style.color = 'var(--text3)';
+  } else if (status === 'saved') {
+    const t = new Date(_lastSaveTime);
+    const ts = `${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}:${String(t.getSeconds()).padStart(2,'0')}`;
+    el.textContent = `✅ 已同步 ${ts}`;
+    el.style.color = 'var(--success)';
+  } else if (status === 'local') {
+    el.textContent = '💾 本機儲存';
+    el.style.color = 'var(--text3)';
+  } else {
+    el.textContent = '❌ 儲存失敗';
+    el.style.color = 'var(--danger)';
+  }
+}
+
+async function loadWhoami() {
+  if (_useLocalFallback) {
+    currentUser = { email: '', name: '' };
+    return;
+  }
+  try {
+    const res = await fetch('/api/whoami');
+    const data = await res.json();
+    currentUser = { email: data.email || '', name: data.name || data.email || '' };
+  } catch(e) {
+    currentUser = { email: '', name: '' };
+  }
+}
+
+// ============================================================
+// UTILITIES
+// ============================================================
+
+function getDaysInMonth(y, m) { return new Date(y, m, 0).getDate(); }
+function getDow(y, m, d) { return new Date(y, m-1, d).getDay(); }
+function dateKey(d) {
+  if (typeof d === 'string') return d;
+  return `${state.year}-${String(state.month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+function dowLabel(dow) { return ['日','一','二','三','四','五','六'][dow]; }
+function isWeekend(dow) { return dow === 0 || dow === 6; }
+
+function getStoreDay(storeId, day) {
+  const ss = state.storeSettings[storeId];
+  const dk = dateKey(day);
+  const ovr = ss.dailyOverrides[dk] || {};
+  const dow = getDow(state.year, state.month, typeof day === 'number' ? day : parseInt(day.split('-')[2]));
+  const weekendDefault = isWeekend(dow) ? 2 : ss.defaultStaff;
+  return {
+    shiftType: ovr.shiftType || ss.defaultShiftType,
+    staff: ovr.staff ?? weekendDefault,
+  };
+}
+
+function getSlotKeys(storeId, day) {
+  const sd = getStoreDay(storeId, day);
+  const dk = dateKey(day);
+  if (sd.shiftType === 'FULL') {
+    return [{ key:`${dk}_${storeId}_FULL`, type:'FULL', staff:sd.staff }];
+  } else {
+    return [
+      { key:`${dk}_${storeId}_AM`, type:'AM', staff:sd.staff },
+      { key:`${dk}_${storeId}_PM`, type:'PM', staff:sd.staff },
+    ];
+  }
+}
+
+function getAssigned(slotKey) {
+  return state.assignments[slotKey] || [];
+}
+
+function isEmployeeAvailable(emp, day) {
+  const dk = typeof day === 'number' ? day : parseInt(day.split('-')[2]);
+  return emp.availability && emp.availability.includes(dk);
+}
+
+function countShifts(empId) {
+  let c = 0;
+  for (const [k, arr] of Object.entries(state.assignments)) {
+    if (arr.includes(empId)) c++;
+  }
+  return c;
+}
+
+function countShiftDays(empId) {
+  const days = new Set();
+  for (const [k, arr] of Object.entries(state.assignments)) {
+    if (arr.includes(empId)) {
+      days.add(k.split('_')[0]); // date part
+    }
+  }
+  return days.size;
+}
+
+function getWorkedDays(empId) {
+  const days = new Set();
+  for (const [k, arr] of Object.entries(state.assignments)) {
+    if (arr.includes(empId)) {
+      days.add(k.split('_')[0]);
+    }
+  }
+  return Array.from(days).sort();
+}
+
+function maxConsecutive(empId) {
+  const days = getWorkedDays(empId);
+  if (days.length === 0) return 0;
+  let max = 1, cur = 1;
+  for (let i = 1; i < days.length; i++) {
+    const prev = new Date(days[i-1]);
+    const curr = new Date(days[i]);
+    const diff = (curr - prev) / 86400000;
+    if (diff === 1) { cur++; max = Math.max(max, cur); }
+    else { cur = 1; }
+  }
+  return max;
+}
+
+function isConflictPair(empId1, empId2) {
+  return state.conflictPairs.some(([a,b]) =>
+    (a === empId1 && b === empId2) || (a === empId2 && b === empId1)
+  );
+}
+
+function getConflictsOnSlot(slotKey) {
+  const assigned = getAssigned(slotKey);
+  const conflicts = [];
+  for (let i = 0; i < assigned.length; i++) {
+    for (let j = i+1; j < assigned.length; j++) {
+      if (isConflictPair(assigned[i], assigned[j])) {
+        conflicts.push([assigned[i], assigned[j]]);
+      }
+    }
+  }
+  return conflicts;
+}
+
+// Check if adding empId to a slot would cause a conflict with existing assigned people
+function wouldConflictOnSlot(empId, slotKey) {
+  const assigned = getAssigned(slotKey);
+  return assigned.some(otherId => isConflictPair(empId, otherId));
+}
+
+// Get all same-store slots on a given day (for conflict: same store same day counts)
+function getSameStoreDaySlotKeys(storeId, day) {
+  return getSlotKeys(storeId, day);
+}
+
+// Check if empId would conflict with anyone already assigned to the same store on the same day
+function wouldConflictOnStoreDay(empId, storeId, day) {
+  const slots = getSlotKeys(storeId, day);
+  for (const slot of slots) {
+    const assigned = getAssigned(slot.key);
+    if (assigned.some(otherId => isConflictPair(empId, otherId))) return true;
+  }
+  return false;
+}
+
+function getViolations() {
+  const v = [];
+  const maxC = state.constraints.maxConsecutive;
+  const totalDays = getDaysInMonth(state.year, state.month);
+  for (const emp of state.employees) {
+    const minS = emp.minShifts ?? state.constraints.defaultMinShifts;
+    const maxS = emp.maxShifts ?? state.constraints.defaultMaxShifts;
+    const sd = countShiftDays(emp.id);
+    const availDays = (emp.availability || []).length;
+    if (sd < minS) v.push({ empId:emp.id, type:'under', msg:`${emp.name} 排班 ${sd} 天，低於下限 ${minS}` });
+    if (sd > maxS) v.push({ empId:emp.id, type:'over', msg:`${emp.name} 排班 ${sd} 天，超過上限 ${maxS}` });
+    const mc = maxConsecutive(emp.id);
+    if (mc > maxC) v.push({ empId:emp.id, type:'consecutive', msg:`${emp.name} 連續上班 ${mc} 天，超過上限 ${maxC}` });
+    // NEW: scheduled days exceed available days
+    if (sd > availDays) {
+      v.push({ empId:emp.id, type:'overAvail', msg:`${emp.name} 排班 ${sd} 天，超過可上班天數 ${availDays} 天` });
+    }
+    // NEW: scheduled on unavailable day
+    for (let d = 1; d <= totalDays; d++) {
+      if (!isEmployeeAvailable(emp, d)) {
+        let hit = false;
+        for (const store of STORES) {
+          for (const slot of getSlotKeys(store.id, d)) {
+            if (getAssigned(slot.key).includes(emp.id)) { hit = true; break; }
+          }
+          if (hit) break;
+        }
+        if (hit) v.push({ empId:emp.id, type:'unavailable', msg:`${emp.name} 在 ${dateKey(d)} 排班，但該日設為不可上班` });
+      }
+    }
+    // NEW: same day assigned to multiple stores
+    for (let d = 1; d <= totalDays; d++) {
+      const storesOnDay = [];
+      for (const store of STORES) {
+        for (const slot of getSlotKeys(store.id, d)) {
+          if (getAssigned(slot.key).includes(emp.id)) { storesOnDay.push(store.id); break; }
+        }
+      }
+      if (storesOnDay.length > 1) {
+        const names = storesOnDay.map(sid => STORES.find(s=>s.id===sid)?.short||sid).join('、');
+        v.push({ empId:emp.id, type:'multiStore', msg:`${emp.name} 在 ${dateKey(d)} 同時排到多家門市：${names}` });
+      }
+    }
+  }
+  // check understaffed slots
+  for (let d = 1; d <= totalDays; d++) {
+    for (const store of STORES) {
+      const slots = getSlotKeys(store.id, d);
+      for (const slot of slots) {
+        const assigned = getAssigned(slot.key);
+        if (assigned.length < slot.staff) {
+          v.push({ type:'understaffed', msg:`${dateKey(d)} ${store.short} ${SHIFT_TYPES[slot.type].label} 需 ${slot.staff} 人，僅排 ${assigned.length} 人` });
+        }
+        // Check conflict pairs on same slot
+        const slotConflicts = getConflictsOnSlot(slot.key);
+        for (const [a, b] of slotConflicts) {
+          const nameA = state.employees.find(e=>e.id===a)?.name || a;
+          const nameB = state.employees.find(e=>e.id===b)?.name || b;
+          v.push({ type:'conflict', msg:`${dateKey(d)} ${store.short} ${SHIFT_TYPES[slot.type].label}：${nameA} 與 ${nameB} 不可同班` });
+        }
+      }
+    }
+  }
+  return v;
+}
+
+// ============================================================
+// AUTO SCHEDULER (greedy)
+// ============================================================
+
+function autoSchedule() {
+  // Clear existing
+  state.assignments = {};
+  const totalDays = getDaysInMonth(state.year, state.month);
+  const empShiftDays = {}; // empId -> Set of dates
+  const empSlotCount = {}; // empId -> count of slot assignments
+  state.employees.forEach(e => { empShiftDays[e.id] = new Set(); empSlotCount[e.id] = 0; });
+  const maxC = state.constraints.maxConsecutive;
+
+  // Build all slots
+  const allSlots = [];
+  for (let d = 1; d <= totalDays; d++) {
+    for (const store of STORES) {
+      const slots = getSlotKeys(store.id, d);
+      for (const slot of slots) {
+        allSlots.push({ ...slot, day:d, storeId:store.id });
+      }
+    }
+  }
+
+  // Sort: weekend first (harder to fill), then by staff needed desc
+  allSlots.sort((a,b) => {
+    const aw = isWeekend(getDow(state.year, state.month, a.day)) ? 0 : 1;
+    const bw = isWeekend(getDow(state.year, state.month, b.day)) ? 0 : 1;
+    if (aw !== bw) return aw - bw;
+    return b.staff - a.staff;
+  });
+
+  function wouldExceedConsecutive(empId, day) {
+    const dk = dateKey(day);
+    const d = new Date(dk);
+    // check forward and backward
+    let before = 0;
+    for (let i = 1; i <= maxC; i++) {
+      const prev = new Date(d); prev.setDate(prev.getDate() - i);
+      const pk = prev.toISOString().split('T')[0];
+      if (empShiftDays[empId].has(pk)) before++; else break;
+    }
+    let after = 0;
+    for (let i = 1; i <= maxC; i++) {
+      const next = new Date(d); next.setDate(next.getDate() + i);
+      const nk = next.toISOString().split('T')[0];
+      if (empShiftDays[empId].has(nk)) after++; else break;
+    }
+    return (before + 1 + after) > maxC;
+  }
+
+  for (const slot of allSlots) {
+    const needed = slot.staff;
+    const dk = dateKey(slot.day);
+
+    // Get candidates: available, not already assigned this day to another slot that conflicts,
+    // not exceeding max shifts, not exceeding consecutive
+    let candidates = state.employees.filter(e => {
+      if (!isEmployeeAvailable(e, slot.day)) return false;
+      // Store mode: 'assigned' means only allowed stores
+      const sm = e.storeMode || 'none';
+      const sl = e.storeList || e.preferredStores || [];
+      if (sm === 'assigned' && sl.length > 0 && !sl.includes(slot.storeId)) return false;
+      const maxS = e.maxShifts ?? state.constraints.defaultMaxShifts;
+      if (empShiftDays[e.id].size >= maxS && !empShiftDays[e.id].has(dk)) return false;
+      // already on this day? Check if same store + conflicting shift
+      // A person can only work one store per day (full day) or two shifts at same store
+      // Actually: one assignment per day maximum (simplification)
+      if (empShiftDays[e.id].has(dk)) {
+        // Already working this day — skip unless it's AM/PM split at same store
+        // For simplicity: allow AM+PM same store, disallow different store same day
+        const existingSlots = Object.entries(state.assignments).filter(([k,arr]) =>
+          k.startsWith(dk) && arr.includes(e.id)
+        );
+        for (const [ek] of existingSlots) {
+          const parts = ek.split('_');
+          const existStore = parts[1];
+          const existType = parts[2];
+          if (existStore !== slot.storeId) return false; // diff store same day
+          if (existType === 'FULL' || slot.type === 'FULL') return false; // full + anything = conflict
+          if (existType === slot.type) return false; // same shift type
+        }
+      }
+      if (!empShiftDays[e.id].has(dk) && wouldExceedConsecutive(e.id, slot.day)) return false;
+      return true;
+    });
+
+    // Filter out candidates that would conflict with already-assigned people on this slot
+    candidates = candidates.filter(e => {
+      const currentAssigned = state.assignments[slot.key] || [];
+      return !currentAssigned.some(otherId => isConflictPair(e.id, otherId));
+    });
+
+    // Sort: preferred store first, then fewer shifts (balance)
+    candidates.sort((a,b) => {
+      // Preferred store bonus: single preferredStore field takes priority
+      const prefA = a.preferredStore === slot.storeId ? 0 : 1;
+      const prefB = b.preferredStore === slot.storeId ? 0 : 1;
+      if (prefA !== prefB) return prefA - prefB;
+      // Then balance by shift count
+      const sa = empShiftDays[a.id].size;
+      const sb = empShiftDays[b.id].size;
+      return sa - sb;
+    });
+
+    const assigned = [];
+    for (let i = 0; i < candidates.length && assigned.length < needed; i++) {
+      // Check this candidate doesn't conflict with anyone already picked for this slot
+      const conflictsWithPicked = assigned.some(pickedId => isConflictPair(candidates[i].id, pickedId));
+      if (conflictsWithPicked) continue;
+      assigned.push(candidates[i].id);
+      empShiftDays[candidates[i].id].add(dk);
+      empSlotCount[candidates[i].id]++;
+    }
+    if (assigned.length > 0) {
+      state.assignments[slot.key] = assigned;
+    }
+  }
+
+  saveState();
+  render();
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+
+let modal = null;
+
+function render() {
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="header no-print">
+      <h1>
+        <img src="data:image/png;base64,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" alt="Logo" style="height:38px;border-radius:6px;" />
+        <div style="display:flex;flex-direction:column;">
+          <span style="font-size:20px;font-weight:700;letter-spacing:-0.5px;">THE food co. <span style="color:var(--accent);">員工排班系統</span></span>
+          <span style="font-size:10px;color:var(--text3);font-weight:400;margin-top:-2px;">同興實業 ─ 門市班表管理工具 v2.7</span>
+        </div>
+      </h1>
+      <div class="header-actions">
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;margin-right:8px;">
+          ${currentUser.name ? `<span style="font-size:12px;color:var(--text2);">👤 ${currentUser.name}</span>` : ''}
+          <span id="saveIndicator" style="font-size:11px;color:var(--text3);">─</span>
+        </div>
+        <button id="syncBtn" class="btn btn-ghost btn-sm" onclick="refreshData()" title="重新載入最新資料">🔄 同步</button>
+        <button class="theme-toggle" onclick="toggleTheme()" id="themeToggleBtn">
+          <span class="toggle-icon">${document.body.classList.contains('light-mode') ? '☀️' : '🌙'}</span>
+          <span id="themeLabel">${document.body.classList.contains('light-mode') ? '開燈' : '關燈'}</span>
+        </button>
+        <button class="btn btn-ghost" onclick="exportJSON()">匯出</button>
+        <button class="btn btn-ghost" onclick="importJSON()">匯入</button>
+        <button class="btn btn-ghost" onclick="window.print()">列印</button>
+      </div>
+    </div>
+
+    <div class="no-print">
+      <div class="tabs">
+        <button class="tab ${state.tab==='schedule'?'active':''}" onclick="switchTab('schedule')">排班表</button>
+        <button class="tab ${state.tab==='employees'?'active':''}" onclick="switchTab('employees')">員工管理</button>
+        <button class="tab ${state.tab==='settings'?'active':''}" onclick="switchTab('settings')">門市設定</button>
+        <button class="tab ${state.tab==='help'?'active':''}" onclick="switchTab('help')">📖 使用說明</button>
+        <button class="tab ${state.tab==='changelog'?'active':''}" onclick="switchTab('changelog')">🔄 版本紀錄</button>
+      </div>
+    </div>
+
+    <div id="tabContent"></div>
+    <div id="modalRoot"></div>
+  `;
+
+  if (state.tab === 'schedule') renderScheduleTab();
+  else if (state.tab === 'employees') renderEmployeesTab();
+  else if (state.tab === 'settings') renderSettingsTab();
+  else if (state.tab === 'help') renderHelpTab();
+  else if (state.tab === 'changelog') renderChangelogTab();
+
+  if (modal) {
+    document.getElementById('modalRoot').innerHTML = `
+      <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+        <div class="modal">${modal}</div>
+      </div>
+    `;
+  }
+}
+
+function switchTab(t) { state.tab = t; modal = null; saveState(); render(); }
+function closeModal() { modal = null; render(); }
+
+// ============================================================
+// SCHEDULE TAB
+// ============================================================
+
+function renderScheduleTab() {
+  const tc = document.getElementById('tabContent');
+  const totalDays = getDaysInMonth(state.year, state.month);
+  const violations = getViolations();
+
+  // Month nav
+  let html = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;" class="no-print">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button class="btn btn-ghost btn-sm" onclick="changeMonth(-1)">◀</button>
+        <span style="font-size:18px;font-weight:600;font-family:'JetBrains Mono',monospace;">
+          ${state.year} / ${String(state.month).padStart(2,'0')}
+        </span>
+        <button class="btn btn-ghost btn-sm" onclick="changeMonth(1)">▶</button>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary btn-lg" onclick="autoSchedule()">⚡ 自動排班</button>
+        <button class="btn btn-ghost btn-sm" onclick="showExportImageModal()">📷 匯出圖片</button>
+        <button class="btn btn-danger btn-sm" onclick="clearSchedule()">清除排班</button>
+      </div>
+    </div>
+  `;
+
+  // Stats
+  const totalSlots = (() => {
+    let c = 0;
+    for (let d=1;d<=totalDays;d++) for (const s of STORES) {
+      const slots = getSlotKeys(s.id, d);
+      for (const sl of slots) c += sl.staff;
+    }
+    return c;
+  })();
+  const filledSlots = Object.values(state.assignments).reduce((a,b) => a + b.length, 0);
+
+  html += `
+    <div class="stats-bar no-print">
+      <div class="stat-item">
+        <div class="stat-value">${state.employees.length}</div>
+        <div class="stat-label">員工人數</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">${filledSlots} / ${totalSlots}</div>
+        <div class="stat-label">已排 / 需排</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" style="color:${violations.length?'var(--danger)':'var(--success)'}">${violations.length}</div>
+        <div class="stat-label">違規項目</div>
+      </div>
+    </div>
+  `;
+
+  // Violations
+  if (violations.length > 0) {
+    const criticalTypes = ['over','consecutive','unavailable','multiStore','conflict'];
+    const warnTypes = ['under','overAvail','understaffed'];
+    const critCount = violations.filter(v => criticalTypes.includes(v.type)).length;
+    const warnCount = violations.filter(v => warnTypes.includes(v.type)).length;
+    html += `<div class="card no-print" style="border-color:rgba(239,91,91,0.3);">
+      <div class="card-title" style="color:var(--danger);">⚠ 違規提醒 (${violations.length})</div>
+      <div style="display:flex;gap:12px;margin-bottom:8px;font-size:11px;color:var(--text3);">
+        ${critCount ? `<span style="color:var(--danger);">🔴 嚴重 ${critCount} 項</span>` : ''}
+        ${warnCount ? `<span style="color:var(--warn);">🟡 警告 ${warnCount} 項</span>` : ''}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        ${violations.slice(0,15).map(v => {
+          const isCrit = criticalTypes.includes(v.type);
+          return `<div class="violation" style="border-left:3px solid ${isCrit?'var(--danger)':'var(--warn)'};padding-left:8px;">${v.msg}</div>`;
+        }).join('')}
+        ${violations.length > 15 ? `<div style="font-size:11px;color:var(--text3);">...還有 ${violations.length-15} 項</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  // Legend
+  html += `<div class="legend no-print">
+    ${STORES.map(s => `<div class="legend-item"><div class="legend-dot" style="background:var(--${s.color}bg);border:1px solid var(--${s.color});"></div>${s.name}</div>`).join('')}
+    <div class="legend-item"><div class="legend-dot" style="background:var(--successbg);border:1px solid var(--success);"></div>可排班</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--bg);border:1px solid var(--text3);"></div>不可排</div>
+  </div>`;
+
+  // Per-store schedule grids
+  for (const store of STORES) {
+    html += renderStoreGrid(store, totalDays);
+  }
+
+  // Employee summary
+  html += `<div class="card" style="margin-top:16px;">
+    <div class="card-title">📊 員工排班統計</div>
+    <table>
+      <tr><th>員工</th><th>排班天數</th><th>班次數</th><th>下限</th><th>上限</th><th>可上班天</th><th>最大連續</th><th>狀態</th></tr>
+      ${state.employees.map(e => {
+        const sd = countShiftDays(e.id);
+        const sc = countShifts(e.id);
+        const minS = e.minShifts ?? state.constraints.defaultMinShifts;
+        const maxS = e.maxShifts ?? state.constraints.defaultMaxShifts;
+        const mc = maxConsecutive(e.id);
+        const maxCon = state.constraints.maxConsecutive;
+        const availDays = (e.availability || []).length;
+        const empViolations = violations.filter(vv => vv.empId === e.id);
+        const hasOver = empViolations.some(vv => vv.type === 'over');
+        const hasUnder = empViolations.some(vv => vv.type === 'under');
+        const hasCons = empViolations.some(vv => vv.type === 'consecutive');
+        const hasUnavail = empViolations.some(vv => vv.type === 'unavailable');
+        const hasMultiStore = empViolations.some(vv => vv.type === 'multiStore');
+        const hasOverAvail = empViolations.some(vv => vv.type === 'overAvail');
+        const hasAny = empViolations.length > 0;
+        const statusParts = [];
+        if (hasUnder) statusParts.push('<span title="排班不足" style="color:var(--warn);">⚠️ 不足</span>');
+        if (hasOver) statusParts.push('<span title="排班超上限" style="color:var(--danger);">🔴 超上限</span>');
+        if (hasCons) statusParts.push('<span title="連續超標" style="color:var(--danger);">🔴 連續超標</span>');
+        if (hasUnavail) statusParts.push('<span title="排班日不可上班" style="color:var(--danger);">🔴 日期衝突</span>');
+        if (hasMultiStore) statusParts.push('<span title="同日多店" style="color:var(--danger);">🔴 同日多店</span>');
+        if (hasOverAvail) statusParts.push('<span title="超過可上班天數" style="color:var(--warn);">⚠️ 超可用天</span>');
+        const statusCell = hasAny ? statusParts.join(' ') : '<span style="color:var(--success);">✅ 正常</span>';
+        return `<tr>
+          <td style="font-weight:500;">${e.name}</td>
+          <td style="font-family:'JetBrains Mono',monospace;${sd>availDays?'color:var(--warn);':''}">${sd}</td>
+          <td style="font-family:'JetBrains Mono',monospace;">${sc}</td>
+          <td style="font-family:'JetBrains Mono',monospace;color:var(--text3);">${minS}</td>
+          <td style="font-family:'JetBrains Mono',monospace;color:var(--text3);">${maxS}</td>
+          <td style="font-family:'JetBrains Mono',monospace;color:var(--text3);">${availDays}</td>
+          <td style="font-family:'JetBrains Mono',monospace;${mc > maxCon ? 'color:var(--danger);font-weight:600;' : ''}">${mc}</td>
+          <td style="font-size:11px;white-space:nowrap;">${statusCell}</td>
+        </tr>`;
+      }).join('')}
+    </table>
+  </div>`;
+
+  tc.innerHTML = html;
+}
+
+function renderStoreGrid(store, totalDays) {
+  const cols = totalDays + 1; // +1 for name column
+  let html = `
+    <div class="card" style="overflow-x:auto;padding:12px;">
+      <div class="card-title"><div class="dot" style="background:var(--${store.color})"></div>${store.name}</div>
+      <div class="schedule-grid" style="grid-template-columns:80px repeat(${totalDays}, minmax(44px,1fr));">
+  `;
+
+  // Header row: dates
+  html += `<div class="sg-cell name-cell header-cell">日期</div>`;
+  for (let d = 1; d <= totalDays; d++) {
+    const dow = getDow(state.year, state.month, d);
+    const dowClass = dow === 6 ? 'dow-sat' : dow === 0 ? 'dow-sun' : '';
+    html += `<div class="sg-cell header-cell ${dowClass}">${d}<br><span style="font-size:9px;">${dowLabel(dow)}</span></div>`;
+  }
+
+  // Employee rows
+  for (const emp of state.employees) {
+    html += `<div class="sg-cell name-cell">${emp.name}</div>`;
+    for (let d = 1; d <= totalDays; d++) {
+      const avail = isEmployeeAvailable(emp, d);
+      const dk = dateKey(d);
+      const slots = getSlotKeys(store.id, d);
+
+      // Check if assigned to this store on this day
+      let assignedHere = false;
+      let cellContent = '';
+      let cellClass = '';
+
+      for (const slot of slots) {
+        const asg = getAssigned(slot.key);
+        if (asg.includes(emp.id)) {
+          assignedHere = true;
+          const typeLabel = SHIFT_TYPES[slot.type].short;
+          cellContent += `<div class="shift-content"><span class="shift-store">${typeLabel}</span></div>`;
+        }
+      }
+
+      if (assignedHere) {
+        cellClass = `assigned ${store.color}`;
+        html += `<div class="sg-cell ${cellClass}" onclick="toggleAssign('${emp.id}','${store.id}',${d})">${cellContent}</div>`;
+      } else if (avail) {
+        html += `<div class="sg-cell available" onclick="toggleAssign('${emp.id}','${store.id}',${d})">○</div>`;
+      } else {
+        html += `<div class="sg-cell unavailable">—</div>`;
+      }
+    }
+  }
+
+  // Staffing summary row
+  html += `<div class="sg-cell name-cell" style="font-weight:600;color:var(--text2);font-size:10px;">人力</div>`;
+  for (let d = 1; d <= totalDays; d++) {
+    const slots = getSlotKeys(store.id, d);
+    let filled = 0, needed = 0;
+    for (const slot of slots) {
+      filled += getAssigned(slot.key).length;
+      needed += slot.staff;
+    }
+    const ok = filled >= needed;
+    html += `<div class="sg-cell" style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;color:${ok?'var(--success)':'var(--danger)'};">${filled}/${needed}</div>`;
+  }
+
+  html += `</div></div>`;
+  return html;
+}
+
+function toggleAssign(empId, storeId, day) {
+  const emp = state.employees.find(e => e.id === empId);
+  if (!emp || !isEmployeeAvailable(emp, day)) return;
+
+  const slots = getSlotKeys(storeId, day);
+
+  // Check if already assigned
+  let wasAssigned = false;
+  for (const slot of slots) {
+    const asg = getAssigned(slot.key);
+    const idx = asg.indexOf(empId);
+    if (idx >= 0) {
+      asg.splice(idx, 1);
+      state.assignments[slot.key] = asg;
+      wasAssigned = true;
+    }
+  }
+
+  if (!wasAssigned) {
+    // Assign to first slot
+    const slot = slots[0];
+    if (!state.assignments[slot.key]) state.assignments[slot.key] = [];
+    state.assignments[slot.key].push(empId);
+    // If split shift, show modal to choose AM/PM
+    if (slots.length > 1) {
+      showShiftChoiceModal(empId, storeId, day, slots);
+      return;
+    }
+  }
+
+  saveState();
+  render();
+}
+
+function showShiftChoiceModal(empId, storeId, day, slots) {
+  const emp = state.employees.find(e => e.id === empId);
+  const store = STORES.find(s => s.id === storeId);
+  // Remove from first slot (we added it above)
+  const firstAsg = state.assignments[slots[0].key];
+  if (firstAsg) {
+    const idx = firstAsg.indexOf(empId);
+    if (idx >= 0) firstAsg.splice(idx, 1);
+  }
+
+  modal = `
+    <h2>選擇班別 — ${emp.name} @ ${store.short} ${dateKey(day)}</h2>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      ${slots.map(sl => `
+        <button class="btn btn-primary btn-lg" onclick="assignSlot('${empId}','${sl.key}')">${SHIFT_TYPES[sl.type].label}</button>
+      `).join('')}
+      <button class="btn btn-ghost btn-lg" onclick="assignBothSlots('${empId}','${slots.map(s=>s.key).join(',')}')" style="margin-left:8px;">早晚都排</button>
+    </div>
+    <button class="btn btn-ghost" style="margin-top:12px;" onclick="closeModal()">取消</button>
+  `;
+  render();
+}
+
+function assignSlot(empId, slotKey) {
+  if (!state.assignments[slotKey]) state.assignments[slotKey] = [];
+  if (!state.assignments[slotKey].includes(empId)) {
+    state.assignments[slotKey].push(empId);
+  }
+  modal = null;
+  saveState();
+  render();
+}
+
+function assignBothSlots(empId, keys) {
+  keys.split(',').forEach(k => {
+    if (!state.assignments[k]) state.assignments[k] = [];
+    if (!state.assignments[k].includes(empId)) state.assignments[k].push(empId);
+  });
+  modal = null;
+  saveState();
+  render();
+}
+
+async function changeMonth(delta) {
+  state.month += delta;
+  if (state.month > 12) { state.month = 1; state.year++; }
+  if (state.month < 1) { state.month = 12; state.year--; }
+  state.assignments = {};
+  render();
+  await loadState();
+  render();
+}
+
+async function refreshData() {
+  // If a save is still in flight, wait for it first to avoid overwriting fresh data
+  if (_savePromise) {
+    setSaveIndicator('saving');
+    try { await _savePromise; } catch(e) {}
+  }
+  if (_useLocalFallback) {
+    loadStateFromLocalStorage();
+    render();
+    return;
+  }
+  setSaveIndicator('saving');
+  await loadState();
+  render();
+  setSaveIndicator('saved');
+}
+
+function clearSchedule() {
+  if (confirm('確定清除所有排班資料？（員工可排班日不受影響）')) {
+    state.assignments = {};
+    saveState();
+    render();
+  }
+}
+
+// ============================================================
+// EMPLOYEES TAB
+// ============================================================
+
+function renderEmployeesTab() {
+  const tc = document.getElementById('tabContent');
+  const totalDays = getDaysInMonth(state.year, state.month);
+
+  let html = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <span style="color:var(--text2);font-size:13px;">共 ${state.employees.length} 位員工</span>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary" onclick="addEmployee()">+ 新增員工</button>
+        <button class="btn btn-ghost btn-sm" onclick="batchAvailModal()">批次設定可排班日</button>
+      </div>
+    </div>
+  `;
+
+  if (state.employees.length === 0) {
+    html += `<div class="empty-state"><div class="icon">👥</div><div>尚無員工，請點擊「新增員工」開始設定</div></div>`;
+  }
+
+  for (const emp of state.employees) {
+    const minS = emp.minShifts ?? state.constraints.defaultMinShifts;
+    const maxS = emp.maxShifts ?? state.constraints.defaultMaxShifts;
+    const availCount = (emp.availability || []).length;
+    const conflictNames = state.conflictPairs
+      .filter(([a,b]) => a === emp.id || b === emp.id)
+      .map(([a,b]) => {
+        const otherId = a === emp.id ? b : a;
+        return state.employees.find(e => e.id === otherId)?.name || '?';
+      });
+    const sm = emp.storeMode || 'none';
+    const sl = emp.storeList || emp.preferredStores || [];
+    const storeNames = sl.map(s => STORES.find(st=>st.id===s)?.short).filter(Boolean).join('、');
+    const prefStore = emp.preferredStore || '';
+    const prefStoreName = prefStore ? STORES.find(s=>s.id===prefStore)?.short : '';
+    let storeModeLabel = '';
+    if (sm === 'assigned' && storeNames) {
+      storeModeLabel = `｜ <span style="color:var(--store2);">指定：${storeNames}</span>`;
+      if (prefStoreName) storeModeLabel += ` <span style="color:var(--warn);">（偏好：${prefStoreName}）</span>`;
+    }
+
+    html += `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+          <div>
+            <div style="font-size:15px;font-weight:600;margin-bottom:4px;">${emp.name}</div>
+            <div style="font-size:12px;color:var(--text2);">
+              班次範圍 ${minS}–${maxS} 天 ｜ 本月可排 ${availCount} 天
+              ${storeModeLabel}
+            </div>
+            ${conflictNames.length > 0 ? `<div style="font-size:11px;color:var(--danger);margin-top:4px;">🚫 不可同班：${conflictNames.join('、')}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-ghost btn-sm" onclick="editEmployee('${emp.id}')">編輯</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteEmployee('${emp.id}')">刪除</button>
+          </div>
+        </div>
+        <div style="margin-top:12px;">
+          <label>可排班日（點擊切換）</label>
+          <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:6px;">
+            ${Array.from({length:totalDays}, (_,i) => i+1).map(d => {
+              const avail = isEmployeeAvailable(emp, d);
+              const dow = getDow(state.year, state.month, d);
+              const dowClass = dow === 6 ? 'dow-sat' : dow === 0 ? 'dow-sun' : '';
+              return `<div class="sg-cell ${avail?'available':'unavailable'} ${dowClass}"
+                style="width:36px;height:32px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;border-radius:4px;font-size:11px;"
+                onclick="toggleAvail('${emp.id}',${d})">
+                <span>${d}</span>
+                <span style="font-size:8px;">${dowLabel(dow)}</span>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  tc.innerHTML = html;
+}
+
+function addEmployee() {
+  const name = prompt('請輸入員工姓名：');
+  if (!name || !name.trim()) return;
+  state.employees.push({
+    id: 'emp_' + Date.now(),
+    name: name.trim(),
+    availability: [],
+    minShifts: null,
+    maxShifts: null,
+    storeMode: 'none',       // 'none' | 'preferred' | 'assigned'
+    storeList: [],            // store ids
+    preferredStores: [],      // kept for backward compat
+  });
+  saveState();
+  render();
+}
+
+function editEmployee(empId) {
+  const emp = state.employees.find(e => e.id === empId);
+  if (!emp) return;
+
+  const minS = emp.minShifts ?? state.constraints.defaultMinShifts;
+  const maxS = emp.maxShifts ?? state.constraints.defaultMaxShifts;
+  const sm = emp.storeMode || 'none';
+  const sl = emp.storeList || emp.preferredStores || [];
+
+  modal = `
+    <h2>編輯 — ${emp.name}</h2>
+    <div style="display:flex;flex-direction:column;gap:14px;margin-top:12px;">
+      <div>
+        <label>姓名</label>
+        <input id="editName" value="${emp.name}" />
+      </div>
+      <div class="grid-2">
+        <div>
+          <label>最少班數（天）</label>
+          <input id="editMin" type="number" value="${minS}" min="0" max="31" />
+        </div>
+        <div>
+          <label>最多班數（天）</label>
+          <input id="editMax" type="number" value="${maxS}" min="0" max="31" />
+        </div>
+      </div>
+      <div>
+        <label>門市指派模式</label>
+        <div class="toggle-group" style="margin-top:4px;">
+          <button class="toggle-opt ${sm==='none'?'active':''}" onclick="setStoreMode('none')" id="smNone">不指定</button>
+          <button class="toggle-opt ${sm==='assigned'||sm==='preferred'?'active':''}" onclick="setStoreMode('assigned')" id="smAssign">指定門市</button>
+        </div>
+        <p style="font-size:11px;color:var(--text3);margin-top:6px;" id="storeModeHint">${sm==='none'?'三家門市皆可排班，由系統平均分配。':'只能排到下方勾選的門市。可進一步設定其中偏好的優先門市。'}</p>
+      </div>
+      <div id="storeCheckboxSection" style="${sm==='none'?'opacity:0.4;pointer-events:none;':''}">
+        <div style="background:var(--bg3);border-radius:8px;padding:12px;">
+          <label style="margin-bottom:8px;display:block;">📍 可工作的門市（可複選）</label>
+          <div style="display:flex;gap:12px;margin-top:6px;flex-wrap:wrap;">
+            ${STORES.map(s => `
+              <label class="checkbox-row">
+                <input type="checkbox" class="empStore" value="${s.id}" ${sl.includes(s.id)?'checked':''} onchange="updatePreferredOptions()" />
+                <span style="display:inline-flex;align-items:center;gap:4px;">
+                  <span style="width:8px;height:8px;border-radius:50%;background:var(--${s.color});"></span>
+                  ${s.name}
+                </span>
+              </label>
+            `).join('')}
+          </div>
+          <div id="preferredSection" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);${sl.length===0?'display:none;':''}">
+            <label style="margin-bottom:6px;display:block;">⭐ 優先偏好的門市（從上方勾選中選一個，可留空）</label>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;" id="preferredRadios">
+              ${renderPreferredRadios(sl, emp.preferredStore || '')}
+            </div>
+            <p style="font-size:10px;color:var(--text3);margin-top:6px;">設定偏好後，自動排班會優先將此員工排到偏好門市，其次才是其他可工作門市。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="btn btn-primary" onclick="saveEmployee('${empId}')">儲存</button>
+      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+    </div>
+  `;
+  render();
+}
+
+function renderPreferredRadios(storeList, currentPref) {
+  if (!storeList || storeList.length === 0) return '';
+  let html = `<label class="checkbox-row"><input type="radio" name="prefStore" value="" ${!currentPref?'checked':''} /> <span style="font-size:12px;color:var(--text3);">不設定偏好</span></label>`;
+  for (const sid of storeList) {
+    const s = STORES.find(st => st.id === sid);
+    if (!s) continue;
+    html += `<label class="checkbox-row">
+      <input type="radio" name="prefStore" value="${s.id}" ${currentPref===s.id?'checked':''} />
+      <span style="display:inline-flex;align-items:center;gap:4px;">
+        <span style="width:8px;height:8px;border-radius:50%;background:var(--${s.color});"></span>
+        ${s.name}
+      </span>
+    </label>`;
+  }
+  return html;
+}
+
+function updatePreferredOptions() {
+  const checked = Array.from(document.querySelectorAll('.empStore:checked')).map(c => c.value);
+  const section = document.getElementById('preferredSection');
+  const radios = document.getElementById('preferredRadios');
+  if (!section || !radios) return;
+  if (checked.length === 0) {
+    section.style.display = 'none';
+  } else {
+    section.style.display = 'block';
+    const currentPref = document.querySelector('input[name="prefStore"]:checked')?.value || '';
+    const validPref = checked.includes(currentPref) ? currentPref : '';
+    radios.innerHTML = renderPreferredRadios(checked, validPref);
+  }
+}
+
+function setStoreMode(mode) {
+  document.getElementById('smNone').classList.toggle('active', mode==='none');
+  document.getElementById('smAssign').classList.toggle('active', mode==='assigned' || mode==='preferred');
+  const section = document.getElementById('storeCheckboxSection');
+  const hint = document.getElementById('storeModeHint');
+  if (mode === 'none') {
+    section.style.opacity = '0.4'; section.style.pointerEvents = 'none';
+    hint.textContent = '三家門市皆可排班，由系統平均分配。';
+  } else {
+    section.style.opacity = '1'; section.style.pointerEvents = 'auto';
+    hint.textContent = '只能排到下方勾選的門市。可進一步設定其中偏好的優先門市。';
+    updatePreferredOptions();
+  }
+}
+
+function saveEmployee(empId) {
+  const emp = state.employees.find(e => e.id === empId);
+  if (!emp) return;
+  emp.name = document.getElementById('editName').value.trim() || emp.name;
+  const minV = parseInt(document.getElementById('editMin').value);
+  const maxV = parseInt(document.getElementById('editMax').value);
+  emp.minShifts = isNaN(minV) ? null : minV;
+  emp.maxShifts = isNaN(maxV) ? null : maxV;
+  // Store mode: none or assigned (with optional preferred)
+  const isAssigned = document.getElementById('smAssign').classList.contains('active');
+  emp.storeMode = isAssigned ? 'assigned' : 'none';
+  emp.storeList = Array.from(document.querySelectorAll('.empStore:checked')).map(c => c.value);
+  emp.preferredStores = emp.storeList; // backward compat
+  // Preferred store (single, among assigned)
+  const prefRadio = document.querySelector('input[name="prefStore"]:checked');
+  emp.preferredStore = (prefRadio && emp.storeList.includes(prefRadio.value)) ? prefRadio.value : '';
+  modal = null;
+  saveState();
+  render();
+}
+
+function deleteEmployee(empId) {
+  if (!confirm('確定刪除此員工？')) return;
+  state.employees = state.employees.filter(e => e.id !== empId);
+  // Remove from assignments
+  for (const [k, arr] of Object.entries(state.assignments)) {
+    state.assignments[k] = arr.filter(id => id !== empId);
+  }
+  // Remove from conflict pairs
+  state.conflictPairs = state.conflictPairs.filter(([a,b]) => a !== empId && b !== empId);
+  saveState();
+  render();
+}
+
+function toggleAvail(empId, day) {
+  const emp = state.employees.find(e => e.id === empId);
+  if (!emp) return;
+  if (!emp.availability) emp.availability = [];
+  const idx = emp.availability.indexOf(day);
+  if (idx >= 0) emp.availability.splice(idx, 1);
+  else emp.availability.push(day);
+  emp.availability.sort((a,b) => a-b);
+  saveState();
+  render();
+}
+
+function batchAvailModal() {
+  const totalDays = getDaysInMonth(state.year, state.month);
+  modal = `
+    <h2>批次設定可排班日</h2>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:12px;">快速將所有員工設定為特定日期可排班</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+      <button class="btn btn-ghost btn-sm" onclick="batchSetAll()">全部可排</button>
+      <button class="btn btn-ghost btn-sm" onclick="batchSetWeekdays()">僅平日</button>
+      <button class="btn btn-ghost btn-sm" onclick="batchSetWeekends()">僅週末</button>
+      <button class="btn btn-danger btn-sm" onclick="batchClearAll()">全部清除</button>
+    </div>
+    <button class="btn btn-ghost" onclick="closeModal()">關閉</button>
+  `;
+  render();
+}
+
+function batchSetAll() {
+  const totalDays = getDaysInMonth(state.year, state.month);
+  state.employees.forEach(e => { e.availability = Array.from({length:totalDays},(_,i)=>i+1); });
+  modal = null; saveState(); render();
+}
+function batchSetWeekdays() {
+  const totalDays = getDaysInMonth(state.year, state.month);
+  state.employees.forEach(e => {
+    e.availability = [];
+    for (let d=1;d<=totalDays;d++) {
+      if (!isWeekend(getDow(state.year, state.month, d))) e.availability.push(d);
+    }
+  });
+  modal = null; saveState(); render();
+}
+function batchSetWeekends() {
+  const totalDays = getDaysInMonth(state.year, state.month);
+  state.employees.forEach(e => {
+    e.availability = [];
+    for (let d=1;d<=totalDays;d++) {
+      if (isWeekend(getDow(state.year, state.month, d))) e.availability.push(d);
+    }
+  });
+  modal = null; saveState(); render();
+}
+function batchClearAll() {
+  state.employees.forEach(e => { e.availability = []; });
+  modal = null; saveState(); render();
+}
+
+// ============================================================
+// SETTINGS TAB
+// ============================================================
+
+function renderSettingsTab() {
+  const tc = document.getElementById('tabContent');
+  const totalDays = getDaysInMonth(state.year, state.month);
+
+  let html = `
+    <div class="card">
+      <div class="card-title">⚙ 全域約束條件</div>
+      <div class="grid-3">
+        <div>
+          <label>連續排班上限（天）</label>
+          <input type="number" id="maxCons" value="${state.constraints.maxConsecutive}" min="1" max="31"
+            onchange="updateConstraint('maxConsecutive', this.value)" />
+        </div>
+        <div>
+          <label>預設最少班數（天/月）</label>
+          <input type="number" id="defMin" value="${state.constraints.defaultMinShifts}" min="0" max="31"
+            onchange="updateConstraint('defaultMinShifts', this.value)" />
+        </div>
+        <div>
+          <label>預設最多班數（天/月）</label>
+          <input type="number" id="defMax" value="${state.constraints.defaultMaxShifts}" min="0" max="31"
+            onchange="updateConstraint('defaultMaxShifts', this.value)" />
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Conflict pairs section
+  html += `
+    <div class="card">
+      <div class="card-title" style="color:var(--danger);">🚫 互斥排班（不可同班）</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:12px;">設定不能排在同一班次的員工組合。自動排班和違規檢查都會遵守此規則。</p>
+      ${state.conflictPairs.length === 0 ? `
+        <div style="padding:16px;text-align:center;color:var(--text3);font-size:12px;">尚未設定互斥組合</div>
+      ` : `
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;">
+          ${state.conflictPairs.map(([a,b], idx) => {
+            const nameA = state.employees.find(e=>e.id===a)?.name || '（已刪除）';
+            const nameB = state.employees.find(e=>e.id===b)?.name || '（已刪除）';
+            return `<div class="conflict-pair">
+              <div class="names">${nameA} <span class="vs">⚡</span> ${nameB}</div>
+              <button class="btn btn-danger btn-sm" onclick="removeConflictPair(${idx})">移除</button>
+            </div>`;
+          }).join('')}
+        </div>
+      `}
+      ${state.employees.length >= 2 ? `
+        <div class="conflict-add-row">
+          <div style="flex:1;">
+            <label>員工 A</label>
+            <select id="conflictA">
+              ${state.employees.map(e => `<option value="${e.id}">${e.name}</option>`).join('')}
+            </select>
+          </div>
+          <div style="flex:1;">
+            <label>員工 B</label>
+            <select id="conflictB">
+              ${state.employees.map((e,i) => `<option value="${e.id}" ${i===1?'selected':''}>${e.name}</option>`).join('')}
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="addConflictPair()" style="margin-bottom:1px;">新增互斥</button>
+        </div>
+      ` : `
+        <p style="font-size:11px;color:var(--text3);">需至少 2 位員工才能設定互斥組合。</p>
+      `}
+    </div>
+  `;
+
+  // Store management card
+  html += `
+    <div class="card">
+      <div class="card-title">🏪 門市管理</div>
+      <div style="margin-bottom:12px;">
+        ${STORES.map(s => `
+          <div class="store-config-row">
+            <div style="width:12px;height:12px;border-radius:50%;background:var(--${s.color});flex-shrink:0;"></div>
+            <div style="flex:1;">
+              <span style="font-weight:600;font-size:13px;">${s.name}</span>
+              <span style="font-size:11px;color:var(--text3);margin-left:8px;">縮寫：${s.short}</span>
+            </div>
+            <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px;" onclick="editStoreInfo('${s.id}')">✏️ 編輯</button>
+            ${STORES.length > 1 ? `<button class="btn btn-danger btn-sm" style="padding:4px 10px;font-size:12px;" onclick="removeStore('${s.id}')">🗑 刪除</button>` : ''}
+          </div>
+        `).join('')}
+      </div>
+      ${STORES.length < COLOR_PALETTE.length ? `
+        <button class="btn btn-primary" onclick="showAddStoreModal()">➕ 新增門市</button>
+      ` : `
+        <p style="font-size:11px;color:var(--text3);">已達最多 ${COLOR_PALETTE.length} 家門市上限。</p>
+      `}
+    </div>
+  `;
+
+  // Store settings
+  for (const store of STORES) {
+    const ss = state.storeSettings[store.id];
+    html += `
+      <div class="card">
+        <div class="card-title"><div class="dot" style="background:var(--${store.color})"></div>${store.name}</div>
+        <div class="grid-2" style="margin-bottom:16px;">
+          <div>
+            <label>預設班別</label>
+            <div class="toggle-group">
+              <button class="toggle-opt ${ss.defaultShiftType==='FULL'?'active':''}"
+                onclick="setStoreDefault('${store.id}','shiftType','FULL')">整日班</button>
+              <button class="toggle-opt ${ss.defaultShiftType==='SPLIT'?'active':''}"
+                onclick="setStoreDefault('${store.id}','shiftType','SPLIT')">早晚班</button>
+            </div>
+          </div>
+          <div>
+            <label>預設每班人數</label>
+            <input type="number" value="${ss.defaultStaff}" min="1" max="5"
+              onchange="setStoreDefault('${store.id}','staff',this.value)" />
+          </div>
+        </div>
+        <div>
+          <label style="margin-bottom:8px;">每日設定（點擊日期可個別調整班別及人數，假日預設 2 人）</label>
+          <div style="display:flex;flex-wrap:wrap;gap:3px;">
+            ${Array.from({length:totalDays},(_,i)=>i+1).map(d => {
+              const dk = dateKey(d);
+              const ovr = ss.dailyOverrides[dk];
+              const dow = getDow(state.year, state.month, d);
+              const dowClass = dow === 6 ? 'dow-sat' : dow === 0 ? 'dow-sun' : '';
+              const sd = getStoreDay(store.id, d);
+              const staffLabel = sd.staff > 1 ? `×${sd.staff}` : '';
+              const typeIcon = sd.shiftType === 'FULL' ? '全' : '分';
+              const hasOverride = !!ovr;
+              return `<div class="sg-cell ${dowClass}" style="width:48px;height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;border-radius:4px;font-size:10px;${hasOverride?'border:1px solid var(--accent);':''}"
+                onclick="editDayOverride('${store.id}',${d})">
+                <span style="font-weight:600;">${d}</span>
+                <span style="font-size:8px;color:${dow===0?'var(--danger)':dow===6?'var(--store2)':'var(--text3)'};">${dowLabel(dow)}</span>
+                <span style="font-size:8px;color:var(--text3);">${typeIcon}${staffLabel}</span>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // Data management
+  html += `
+    <div class="card">
+      <div class="card-title">🗃 資料管理</div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-danger" onclick="resetAll()">重設所有資料</button>
+      </div>
+      <p style="font-size:11px;color:var(--text3);margin-top:8px;">資料即時儲存至 Cloudflare KV 雲端，所有登入使用者共用同一份資料。</p>
+    </div>
+  `;
+
+  tc.innerHTML = html;
+}
+
+function updateConstraint(key, val) {
+  state.constraints[key] = parseInt(val) || 0;
+  saveState();
+}
+
+function addConflictPair() {
+  const a = document.getElementById('conflictA').value;
+  const b = document.getElementById('conflictB').value;
+  if (a === b) { alert('請選擇兩位不同的員工'); return; }
+  // Check if pair already exists
+  const exists = state.conflictPairs.some(([x,y]) =>
+    (x === a && y === b) || (x === b && y === a)
+  );
+  if (exists) { alert('此互斥組合已存在'); return; }
+  state.conflictPairs.push([a, b]);
+  saveState();
+  render();
+}
+
+function removeConflictPair(idx) {
+  state.conflictPairs.splice(idx, 1);
+  saveState();
+  render();
+}
+
+function setStoreDefault(storeId, field, val) {
+  if (field === 'shiftType') {
+    state.storeSettings[storeId].defaultShiftType = val;
+  } else if (field === 'staff') {
+    state.storeSettings[storeId].defaultStaff = parseInt(val) || 1;
+  }
+  saveState();
+  render();
+}
+
+function editDayOverride(storeId, day) {
+  const dk = dateKey(day);
+  const ss = state.storeSettings[storeId];
+  const ovr = ss.dailyOverrides[dk] || {};
+  const sd = getStoreDay(storeId, day);
+  const store = STORES.find(s => s.id === storeId);
+  const dow = getDow(state.year, state.month, day);
+
+  modal = `
+    <h2>${store.name} — ${state.month}/${day}（${dowLabel(dow)}）</h2>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px;">
+      <div>
+        <label>班別</label>
+        <div class="toggle-group">
+          <button class="toggle-opt ${sd.shiftType==='FULL'?'active':''}" id="ovrFull"
+            onclick="this.classList.add('active');document.getElementById('ovrSplit').classList.remove('active')">整日班</button>
+          <button class="toggle-opt ${sd.shiftType!=='FULL'?'active':''}" id="ovrSplit"
+            onclick="this.classList.add('active');document.getElementById('ovrFull').classList.remove('active')">早晚班</button>
+        </div>
+      </div>
+      <div>
+        <label>人數</label>
+        <input type="number" id="ovrStaff" value="${sd.staff}" min="1" max="5" />
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="btn btn-primary" onclick="saveDayOverride('${storeId}','${dk}')">儲存</button>
+      <button class="btn btn-danger btn-sm" onclick="clearDayOverride('${storeId}','${dk}')">恢復預設</button>
+      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+    </div>
+  `;
+  render();
+}
+
+function saveDayOverride(storeId, dk) {
+  const isFullActive = document.getElementById('ovrFull').classList.contains('active');
+  const staff = parseInt(document.getElementById('ovrStaff').value) || 1;
+  state.storeSettings[storeId].dailyOverrides[dk] = {
+    shiftType: isFullActive ? 'FULL' : 'SPLIT',
+    staff: staff,
+  };
+  modal = null;
+  saveState();
+  render();
+}
+
+function clearDayOverride(storeId, dk) {
+  delete state.storeSettings[storeId].dailyOverrides[dk];
+  modal = null;
+  saveState();
+  render();
+}
+
+// ── Store management ─────────────────────────────────────────
+
+function showAddStoreModal() {
+  modal = `
+    <h2>➕ 新增門市</h2>
+    <div style="display:flex;flex-direction:column;gap:14px;margin-top:12px;">
+      <div>
+        <label>門市名稱（例：信義新光）</label>
+        <input id="newStoreName" placeholder="請輸入門市全名" />
+      </div>
+      <div>
+        <label>門市縮寫（2–4 字，例：信義）</label>
+        <input id="newStoreShort" placeholder="請輸入縮寫" maxlength="4" />
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="btn btn-primary" onclick="confirmAddStore()">新增</button>
+      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+    </div>
+  `;
+  render();
+}
+
+function confirmAddStore() {
+  const name = (document.getElementById('newStoreName').value || '').trim();
+  const short = (document.getElementById('newStoreShort').value || '').trim();
+  if (!name)  { alert('請輸入門市名稱'); return; }
+  if (!short) { alert('請輸入門市縮寫'); return; }
+  if (STORES.length >= COLOR_PALETTE.length) { alert('最多支援 ' + COLOR_PALETTE.length + ' 家門市'); return; }
+
+  const usedColors = STORES.map(s => s.color);
+  const nextColor = COLOR_PALETTE.find(c => !usedColors.includes(c)) || 'store1';
+  const id = 'store_' + Date.now();
+
+  if (!state.stores) state.stores = [...STORES];
+  state.stores = [...state.stores, { id, name, short, color: nextColor }];
+  STORES = state.stores;
+  state.storeSettings[id] = { defaultShiftType:'FULL', defaultStaff:1, dailyOverrides:{} };
+
+  modal = null;
+  saveState();
+  render();
+}
+
+function removeStore(storeId) {
+  const store = STORES.find(s => s.id === storeId);
+  if (!store) return;
+  if (STORES.length <= 1) { alert('至少要保留一家門市'); return; }
+
+  const hasAssignments = Object.keys(state.assignments || {}).some(k => k.includes('_' + storeId + '_'));
+  const msg = hasAssignments
+    ? `「${store.name}」目前有排班資料，刪除後該門市所有排班將一併清除。確定要刪除嗎？`
+    : `確定要刪除「${store.name}」？`;
+  if (!confirm(msg)) return;
+
+  if (hasAssignments) {
+    for (const key of Object.keys(state.assignments)) {
+      if (key.includes('_' + storeId + '_')) delete state.assignments[key];
+    }
+  }
+  state.stores = STORES.filter(s => s.id !== storeId);
+  STORES = state.stores;
+  delete state.storeSettings[storeId];
+
+  for (const emp of state.employees) {
+    if (emp.storeList) emp.storeList = emp.storeList.filter(s => s !== storeId);
+    if (emp.preferredStore === storeId) emp.preferredStore = '';
+  }
+  saveState();
+  render();
+}
+
+function editStoreInfo(storeId) {
+  const store = STORES.find(s => s.id === storeId);
+  if (!store) return;
+  modal = `
+    <h2>✏️ 編輯門市</h2>
+    <div style="display:flex;flex-direction:column;gap:14px;margin-top:12px;">
+      <div>
+        <label>門市名稱</label>
+        <input id="editStoreName" value="${store.name}" />
+      </div>
+      <div>
+        <label>縮寫（2–4 字）</label>
+        <input id="editStoreShort" value="${store.short}" maxlength="4" />
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="btn btn-primary" onclick="saveStoreInfo('${storeId}')">儲存</button>
+      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+    </div>
+  `;
+  render();
+}
+
+function saveStoreInfo(storeId) {
+  const name = (document.getElementById('editStoreName').value || '').trim();
+  const short = (document.getElementById('editStoreShort').value || '').trim();
+  if (!name || !short) { alert('名稱和縮寫不能為空'); return; }
+  const idx = state.stores.findIndex(s => s.id === storeId);
+  if (idx === -1) return;
+  state.stores[idx].name = name;
+  state.stores[idx].short = short;
+  STORES = state.stores;
+  modal = null;
+  saveState();
+  render();
+}
+
+async function resetAll() {
+  if (!confirm('確定要重設所有資料？此操作不可復原。')) return;
+  state = { ...DEFAULT_STATE, stores: [...DEFAULT_STORES] };
+  STORES = state.stores;
+  await saveState();
+  render();
+}
+
+// ============================================================
+// HELP TAB
+// ============================================================
+
+function renderHelpTab() {
+  const tc = document.getElementById('tabContent');
+  tc.innerHTML = `
+    <div class="card" style="border-left:3px solid var(--accent);">
+      <div class="card-title" style="font-size:16px;">📖 使用說明</div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:20px;">本系統為 THE food co. 同興實業三家門市的員工排班工具，以下說明各功能模組的操作方式。</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">一、快速開始（建議流程）</div>
+      <div style="font-size:13px;line-height:2;color:var(--text2);">
+        <div><span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;text-align:center;line-height:24px;font-size:12px;font-weight:600;margin-right:8px;">1</span>進入「<b style="color:var(--text);">員工管理</b>」新增所有員工</div>
+        <div><span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;text-align:center;line-height:24px;font-size:12px;font-weight:600;margin-right:8px;">2</span>在每位員工卡片上，點擊日期格子設定該員工「本月可上班日」</div>
+        <div><span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;text-align:center;line-height:24px;font-size:12px;font-weight:600;margin-right:8px;">3</span>進入「<b style="color:var(--text);">門市設定</b>」調整各店班別（整日 / 早晚班）及每班所需人數</div>
+        <div><span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;text-align:center;line-height:24px;font-size:12px;font-weight:600;margin-right:8px;">4</span>如有不合的員工，在門市設定的「互斥排班」區新增組合</div>
+        <div><span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;text-align:center;line-height:24px;font-size:12px;font-weight:600;margin-right:8px;">5</span>回到「<b style="color:var(--text);">排班表</b>」按下「⚡ 自動排班」一鍵產出</div>
+        <div><span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;text-align:center;line-height:24px;font-size:12px;font-weight:600;margin-right:8px;">6</span>檢視違規提醒，手動微調個別格子，完成排班</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">二、排班表</div>
+      <div style="font-size:13px;line-height:1.9;color:var(--text2);">
+        <p>三家門市各有獨立的排班表格，橫軸為日期，縱軸為員工。</p>
+        <p><b style="color:var(--text);">格子顏色意義：</b></p>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;margin:8px 0 12px;">
+          <span><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:rgba(111,207,151,0.08);border:1px solid var(--success);vertical-align:middle;margin-right:4px;"></span> ○ 可排班（點擊可指派）</span>
+          <span><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:var(--store1bg);border:1px solid var(--store1);vertical-align:middle;margin-right:4px;"></span> 已排班（點擊可取消）</span>
+          <span><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:var(--bg);border:1px solid var(--text3);vertical-align:middle;margin-right:4px;"></span> — 不可排班</span>
+        </div>
+        <p><b style="color:var(--text);">手動排班：</b>點擊「○」格子即指派該員工到該日該店。若該日為早晚班制，會跳出選擇視窗讓你選早班、晚班或都排。再次點擊已排班格子可取消。</p>
+        <p><b style="color:var(--text);">自動排班：</b>按「⚡ 自動排班」會清除現有排班並重新計算。演算法優先填滿週末（較難排的時段），並平均分配班次給每位員工，同時遵守所有約束條件。</p>
+        <p><b style="color:var(--text);">底部人力列：</b>每日顯示「已排/需排」人數，綠色表示滿足、紅色表示不足。</p>
+        <p><b style="color:var(--text);">違規提醒：</b>排班表上方會即時顯示所有違規項目，包括：班數超出上下限、連續天數超標、人力不足、互斥員工同班。</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">三、員工管理</div>
+      <div style="font-size:13px;line-height:1.9;color:var(--text2);">
+        <p><b style="color:var(--text);">新增員工：</b>點擊「+ 新增員工」輸入姓名即可。</p>
+        <p><b style="color:var(--text);">設定可排班日：</b>在每位員工的卡片上，直接點擊日期格子來切換可/不可排班。每月底員工通知哪幾天可上班後，在這裡設定。</p>
+        <p><b style="color:var(--text);">批次設定：</b>點擊「批次設定可排班日」可快速將所有員工設為全部可排、僅平日、僅週末或全部清除。</p>
+        <p><b style="color:var(--text);">編輯員工：</b>可調整姓名、個人最少/最多班數（留空則套用全域預設值）。</p>
+        <p><b style="color:var(--text);">門市指派模式：</b>兩種模式可選：</p>
+        <div style="margin:4px 0 8px 16px;">
+          <p>• <b style="color:var(--text);">不指定</b> — 三家門市皆可排，由系統平均分配。</p>
+          <p>• <b style="color:var(--store2);">指定門市</b> — 只能排到勾選的門市（可複選）。例如員工只在台北車站和中山誠品工作，就勾選這兩家。</p>
+          <p>• &nbsp;&nbsp;⭐ <b style="color:var(--warn);">偏好優先</b>（指定模式下的進階選項）— 從已指定的門市中，選擇一個「優先偏好」門市。自動排班會優先將此員工排到偏好門市，空位不足時才排到其他指定門市。</p>
+        </div>
+        <p><b style="color:var(--text);">互斥標記：</b>若該員工有設定互斥組合，卡片下方會顯示紅字提醒。</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">四、門市設定</div>
+      <div style="font-size:13px;line-height:1.9;color:var(--text2);">
+        <p><b style="color:var(--text);">全域約束條件：</b>設定連續排班上限天數（例如最多連排 6 天），以及預設的每月最少/最多班數。</p>
+        <p><b style="color:var(--text);">互斥排班（不可同班）：</b>設定哪些員工彼此不能排在同一班次。自動排班會遵守此規則，手動排班若違反則會出現在違規提醒中。</p>
+        <p><b style="color:var(--text);">各門市設定：</b>每家店可設定預設班別（整日班 or 早晚班）和每班需要的人數。</p>
+        <p><b style="color:var(--text);">每日例外：</b>點擊日期格子可針對特定日期調整班別和人數。例如週末改為雙人班，或特定假日改為早晚分班。有藍色外框的日期表示已設定例外。</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">五、資料管理</div>
+      <div style="font-size:13px;line-height:1.9;color:var(--text2);">
+        <p><b style="color:var(--text);">儲存位置：</b>所有資料即時儲存至 Cloudflare KV 雲端資料庫，所有登入使用者共用同一份即時資料，不需手動傳輸。</p>
+        <p><b style="color:var(--text);">即時同步：</b>任何修改（排班、員工設定、門市設定）都會在 0.4 秒內自動上傳。右上角顯示最後同步時間。</p>
+        <p><b style="color:var(--text);">手動同步：</b>點擊右上角「🔄 同步」按鈕可立即從雲端重新載入最新資料（適合多人同時使用時確認他人修改）。</p>
+        <p><b style="color:var(--text);">匯出：</b>點擊右上角「匯出」按鈕，會下載一個 .json 檔案作為備份。</p>
+        <p><b style="color:var(--text);">匯入：</b>點擊「匯入」選擇備份的 .json 檔案，即可還原所有資料到雲端。</p>
+        <p><b style="color:var(--text);">切換月份：</b>在排班表頁面用 ◀ ▶ 切換月份。員工資料和門市設定跨月共用，但排班資料按月份分開儲存。</p>
+        <p><b style="color:var(--text);">列印：</b>點擊「列印」可直接列印當前排班表。</p>
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================
+// CHANGELOG TAB
+// ============================================================
+
+function renderChangelogTab() {
+  const tc = document.getElementById('tabContent');
+
+  const logs = [
+    {
+      version: 'v2.7',
+      date: '2026-05-05',
+      title: '動態門市管理 — 新增 / 編輯 / 刪除門市',
+      items: [
+        '🏪 門市管理：在「門市設定」頁新增「門市管理」區塊，可自由新增、編輯名稱縮寫、刪除門市',
+        '➕ 新增門市：輸入門市全名與縮寫即可建立，系統自動分配顏色（最多支援 8 家門市）',
+        '✏️ 編輯門市：可隨時修改任意門市的名稱與縮寫，即時同步至排班表、圖例與圖片匯出',
+        '🗑 刪除門市：刪除前會提示是否有排班資料，確認後自動清除相關排班並更新員工門市指派',
+        '🎨 擴充色彩系統：新增紫、粉、青、橘、黃綠共 5 種門市配色（store4–store8），支援深淺主題',
+        '🖼 匯出圖片支援新門市：圖片色系根據門市配色自動套用，不再限定三家固定門市',
+        '📋 排班表圖例動態化：圖例從固定三家改為依目前門市清單動態顯示',
+        '💾 門市清單存入 KV 雲端：stores 陣列納入 global 資料，多人共用、切換月份均保留門市設定',
+      ],
+    },
+    {
+      version: 'v2.6',
+      date: '2026-04-11',
+      title: 'Cloudflare 雲端部署 + 圖片輸出品質提升',
+      items: [
+        '🌐 雲端化：系統改為部署在 Cloudflare Pages，資料儲存於 Cloudflare KV，不再依賴瀏覽器 localStorage',
+        '👥 多人即時共用：所有登入使用者共用同一份排班資料，任何修改在 0.4 秒內自動同步至雲端',
+        '🔐 Cloudflare Zero Trust 保護：透過 Email OTP 一次性驗證碼進行身份驗證，非授權人員無法存取',
+        '👤 登入者識別：右上角顯示目前登入的使用者 Email，清楚標示操作者身份',
+        '🔄 手動同步按鈕：新增「🔄 同步」按鈕，可即時從雲端拉取最新資料（適合多人協作時確認他人修改）',
+        '📅 月份獨立儲存：排班資料按年月分開儲存在 KV（格式：schedule:YYYY-MM），切換月份時自動載入對應資料',
+        '🌐 員工/設定跨月共用：員工名單、門市設定、互斥組合儲存在 global key，切換月份後不需重新設定',
+        '📷 圖片輸出品質大幅提升：格子高度從 120→180px，字體從 11px→15px，渲染 scale 從 2→3，文字更大更清晰',
+        '💾 儲存狀態指示：右上角顯示「⏳ 儲存中」「✅ 已同步 HH:MM:SS」「❌ 儲存失敗」即時回饋',
+      ],
+    },
+    {
+      version: 'v2.5',
+      date: '2026-04-08',
+      title: '違規偵測全面升級 + 統計狀態強化',
+      items: [
+        '可用日期即時同步：員工管理頁修改可上班日後，排班表違規提醒立即更新，不需重新執行自動排班',
+        '新增違規：排班日不可上班 — 若員工被排在已標為不可上班的日期，立即顯示紅色警告',
+        '新增違規：同日多店衝突 — 同一員工同一天出現在兩家以上門市，系統會列出衝突的門市名稱',
+        '新增違規：排班超過可上班天數 — 若已排天數超過員工本月設定的可上班天，顯示警告',
+        '違規面板新增嚴重度分色：紅色（嚴重）、黃色（警告），並顯示各類型數量統計',
+        '員工統計表「狀態」欄升級：詳細列出各違規類型（不足/超上限/連續超標/日期衝突/同日多店/超可用天）',
+        '員工統計表新增「可上班天」欄位，一目了然對比排班天數',
+      ],
+    },
+    {
+      version: 'v2.4',
+      date: '2026-04-07',
+      title: '匯出圖片支援開燈/關燈模式',
+      items: [
+        '匯出圖片功能現在會自動偵測目前的開燈或關燈模式',
+        '開燈模式下匯出：採用淺色底（#f4f5f7）、深色文字、較深品牌色系',
+        '關燈模式下匯出：維持原深色底（#12141f）、亮色文字設計',
+        '週末底色、格線、員工名牌等所有元素均隨模式切換',
+        '星期六/日標示顏色亦依主題調整（開燈橘/紅更深，關燈橘/紅更亮）',
+      ],
+    },
+    {
+      version: 'v2.3',
+      date: '2026-04-07',
+      title: '匯出班表圖片功能',
+      items: [
+        '新增「📷 匯出圖片」按鈕，位於排班表頁面操作列',
+        '點擊後可選擇匯出台北車站、中山誠品或松菸誠品的獨立班表圖片',
+        '圖片版面採桌曆形式，週一至週日橫向排列，一月完整呈現',
+        '圖片寬度 1080px（×2 倍解析度），適合主流手機螢幕尺寸',
+        '平日/週末格子底色區分，星期六橘色、星期日紅色',
+        '每格顯示當日上班員工姓名，早晚班有班別標籤',
+        '各門市使用對應品牌色系（北車藍、中山橘、松菸綠）',
+        '圖片檔名自動帶入年月及門市名稱',
+      ],
+    },
+    {
+      version: 'v2.2',
+      date: '2026-04-07',
+      title: '門市指派重設計 + 開燈/關燈模式',
+      items: [
+        '門市指派模式全面重設計：將原本「不指定/偏好/指定」三模式，改為「不指定」vs「指定門市」兩層邏輯',
+        '指定門市模式下，可從可工作門市中進一步選擇一個「偏好優先門市」',
+        '實際案例支援：例如員工指定在中山誠品+微風北車工作，但偏好優先排中山誠品',
+        '自動排班演算法更新：優先將員工排到其 preferredStore，其次才是其他指定門市',
+        '新增開燈/關燈（Light/Dark Mode）切換按鈕，佈局於右上角標題列',
+        '亮色主題完整設計，所有顏色、邊框、陰影均適配日間使用',
+        '主題偏好儲存於 localStorage，重開頁面後自動套用',
+        '匯出 JSON 檔案名稱新增版本號（例：排班_2026_04_v2.2.json）',
+      ],
+    },
+    {
+      version: 'v2.1',
+      date: '2026-04-01',
+      title: '門市指派模式 + 假日預設雙人',
+      items: [
+        '門市設定：每日設定格子新增「星期幾」標示，一目了然',
+        '門市設定：假日（六、日）各門市預設需求人數自動為 2 人',
+        '員工管理：新增門市指派模式 — 不指定 / 偏好（優先排）/ 指定（只能排）',
+        '自動排班：「偏好」模式的員工會優先被排到偏好門市',
+        '自動排班：「指定」模式的員工只會被排到指定門市，不會出現在其他門市',
+      ],
+    },
+    {
+      version: 'v2.0',
+      date: '2026-03-29',
+      title: '品牌升級 + 說明文件',
+      items: [
+        '加入 THE food co. 同興 LOGO 及品牌標題',
+        '新增「使用說明」頁面，涵蓋完整操作指引',
+        '新增「版本紀錄」頁面，追蹤每次修訂內容',
+      ],
+    },
+    {
+      version: 'v1.2',
+      date: '2026-03-29',
+      title: '互斥排班功能',
+      items: [
+        '新增互斥排班（不可同班）功能 — 可設定彼此不合的員工組合',
+        '自動排班演算法納入互斥約束，不會將衝突員工排在同一班次',
+        '違規檢查新增互斥衝突偵測，即時顯示哪些班次有人際衝突',
+        '員工管理頁顯示互斥關係標記',
+        '刪除員工時自動清理相關互斥設定',
+      ],
+    },
+    {
+      version: 'v1.1',
+      date: '2026-03-29',
+      title: '核心排班功能',
+      items: [
+        '三家門市獨立排班表（台北車站、中山誠品、松菸誠品）',
+        '員工可排班日設定（依員工每月通知設定）',
+        '全域約束條件：連續排班上限、每月最少/最多班數',
+        '每家門市可設定整日班/早晚班、每班人數',
+        '每日例外設定（特定日期調整班別及人數）',
+        '自動排班演算法（Greedy）— 優先填滿週末，平衡分配',
+        '手動排班：點擊格子指派/取消',
+        '違規提醒：班數上下限、連續天數、人力不足即時警告',
+        '員工排班統計表',
+        '匯出/匯入 JSON、列印功能',
+        '資料持久化（localStorage）',
+      ],
+    },
+    {
+      version: 'v1.0',
+      date: '2026-03-29',
+      title: '初始版本',
+      items: [
+        '建立系統基礎架構',
+        '資料模型設計（員工、門市設定、班次、排班）',
+        '深色主題 UI 介面',
+      ],
+    },
+  ];
+
+  let html = `
+    <div class="card" style="border-left:3px solid var(--accent);">
+      <div class="card-title" style="font-size:16px;">🔄 版本修訂紀錄</div>
+      <p style="font-size:13px;color:var(--text2);">記錄每次系統更新的內容，方便追蹤功能演進。</p>
+    </div>
+  `;
+
+  for (const log of logs) {
+    const isLatest = log === logs[0];
+    html += `
+      <div class="card" ${isLatest ? 'style="border-left:3px solid var(--success);"' : ''}>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <span style="background:${isLatest ? 'var(--successbg)' : 'var(--bg3)'};color:${isLatest ? 'var(--success)' : 'var(--text2)'};padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace;">${log.version}</span>
+          <span style="font-size:15px;font-weight:600;">${log.title}</span>
+          <span style="font-size:11px;color:var(--text3);margin-left:auto;font-family:'JetBrains Mono',monospace;">${log.date}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          ${log.items.map(item => `
+            <div style="font-size:13px;color:var(--text2);padding-left:16px;position:relative;">
+              <span style="position:absolute;left:0;color:var(--text3);">•</span>
+              ${item}
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  tc.innerHTML = html;
+}
+
+// ============================================================
+// IMPORT / EXPORT
+// ============================================================
+
+function exportJSON() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `排班_${state.year}_${String(state.month).padStart(2,'0')}_v2.7.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importJSON() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (data.employees && data.storeSettings) {
+        state = { ...DEFAULT_STATE, ...data };
+        await saveStateImmediate(); // use immediate upload, not debounced
+        render();
+      } else {
+        alert('檔案格式不正確');
+      }
+    } catch(e) { alert('無法讀取檔案：' + e.message); }
+  };
+  input.click();
+}
+
+// ============================================================
+// THEME TOGGLE
+// ============================================================
+
+function toggleTheme() {
+  const isLight = document.body.classList.toggle('light-mode');
+  localStorage.setItem('shiftScheduler_theme', isLight ? 'light' : 'dark');
+  const label = document.getElementById('themeLabel');
+  const icon = document.querySelector('.toggle-icon');
+  if (label) label.textContent = isLight ? '開燈' : '關燈';
+  if (icon) icon.textContent = isLight ? '☀️' : '🌙';
+}
+
+function applyTheme() {
+  const saved = localStorage.getItem('shiftScheduler_theme');
+  if (saved === 'light') {
+    document.body.classList.add('light-mode');
+  }
+}
+
+// ============================================================
+// EXPORT IMAGE (calendar-style, per store)
+// ============================================================
+
+function showExportImageModal() {
+  const storeOptions = STORES.map(s => `
+    <button class="btn btn-ghost" style="flex:1;padding:14px 8px;font-size:14px;display:flex;flex-direction:column;align-items:center;gap:6px;border:1px solid var(--border);border-radius:10px;"
+      onclick="exportStoreImage('${s.id}');closeModal();">
+      <span style="font-size:22px;">📷</span>
+      <span style="font-weight:600;">${s.name}</span>
+    </button>
+  `).join('');
+  modal = `
+    <h2>📷 匯出班表圖片</h2>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:20px;">選擇要匯出的門市，產生桌曆式班表圖片（適合手機畫面尺寸）</p>
+    <div style="display:flex;gap:10px;">${storeOptions}</div>
+    <div style="margin-top:16px;text-align:right;">
+      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+    </div>
+  `;
+  render();
+}
+
+function buildCalendarHTML(storeId) {
+  const store = STORES.find(s => s.id === storeId);
+  const totalDays = getDaysInMonth(state.year, state.month);
+  const firstDow = getDow(state.year, state.month, 1); // 0=Sun
+  // Adjust so Monday=0 for calendar grid (Mon–Sun)
+  const firstCol = (firstDow === 0) ? 6 : firstDow - 1; // Mon-based offset
+
+  const isLight = document.body.classList.contains('light-mode');
+
+  const colorData = COLOR_MAP[store.color] || COLOR_MAP.store1;
+  const sc = isLight ? colorData.light : colorData.dark;
+
+  // Theme palette
+  const th = isLight ? {
+    bodyBg:    '#f4f5f7',
+    calWrapBg: '#f4f5f7',
+    headerBg:  '#ffffff',
+    dowBg:     '#eef0f4',
+    dowText:   '#8b90a8',
+    cellBg:    '#ffffff',
+    emptyBg:   '#f4f5f7',
+    weekendBg: '#fdf3e7',
+    borderCol: 'rgba(0,0,0,0.07)',
+    dayNumCol: '#4a5068',
+    noStaff:   '#b0b5c8',
+    satColor:  '#c47d1a',
+    sunColor:  '#d63838',
+    titleCol:  '#1a1d2e',
+    brandCol:  '#8b90a8',
+  } : {
+    bodyBg:    '#12141f',
+    calWrapBg: '#12141f',
+    headerBg:  '#1a1d2a',
+    dowBg:     '#1a1d2a',
+    dowText:   '#636a80',
+    cellBg:    '#181b24',
+    emptyBg:   '#12141f',
+    weekendBg: '#1c1a1a',
+    borderCol: 'rgba(255,255,255,0.05)',
+    dayNumCol: '#9aa0b4',
+    noStaff:   '#3a3f55',
+    satColor:  '#e8a84c',
+    sunColor:  '#ef5b5b',
+    titleCol:  '#e8eaf0',
+    brandCol:  '#636a80',
+  };
+
+  // Gather per-day data
+  const days = [];
+  for (let d = 1; d <= totalDays; d++) {
+    const dow = getDow(state.year, state.month, d);
+    const dk = dateKey(d);
+    const slots = getSlotKeys(storeId, d);
+    const workers = [];
+    for (const slot of slots) {
+      const asg = getAssigned(slot.key);
+      for (const empId of asg) {
+        const emp = state.employees.find(e => e.id === empId);
+        if (emp) {
+          const typeLabel = slots.length > 1 ? SHIFT_TYPES[slot.type].short : '';
+          workers.push({ name: emp.name, type: typeLabel });
+        }
+      }
+    }
+    days.push({ d, dow, workers });
+  }
+
+  // Build 6-row calendar grid with empty leading cells
+  const cells = [];
+  for (let i = 0; i < firstCol; i++) cells.push(null);
+  for (const day of days) cells.push(day);
+  // Pad to complete last row
+  while (cells.length % 7 !== 0) cells.push(null);
+  const weeks = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+
+  const monthLabel = `${state.year} 年 ${state.month} 月`;
+  const dowHeaders = ['一','二','三','四','五','六','日'];
+
+  const cellWidth = Math.floor(1080 / 7);
+  const cellHeight = 180;
+  const headerHeight = 120;
+  const dowHeaderHeight = 52;
+  const totalHeight = headerHeight + dowHeaderHeight + weeks.length * cellHeight + 20;
+
+  let html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Noto Sans TC',sans-serif; background:${th.bodyBg}; width:1080px; }
+.cal-wrap { width:1080px; background:${th.calWrapBg}; padding:0; }
+.cal-header { background:${th.headerBg}; padding:26px 32px 22px; border-bottom:4px solid ${sc.main}; display:flex; align-items:center; justify-content:space-between; }
+.cal-title { font-size:36px; font-weight:700; color:${th.titleCol}; }
+.cal-store { font-size:20px; font-weight:600; color:${sc.main}; margin-top:6px; letter-spacing:0.5px; }
+.cal-brand { font-size:15px; color:${th.brandCol}; margin-top:4px; }
+.dow-row { display:grid; grid-template-columns:repeat(7,1fr); background:${th.dowBg}; }
+.dow-cell { text-align:center; padding:12px 0; font-size:18px; font-weight:700; color:${th.dowText}; }
+.dow-cell.sat { color:${th.satColor}; }
+.dow-cell.sun { color:${th.sunColor}; }
+.week-row { display:grid; grid-template-columns:repeat(7,1fr); border-top:1px solid ${th.borderCol}; }
+.day-cell { min-height:${cellHeight}px; padding:10px 8px 8px; border-right:1px solid ${th.borderCol}; background:${th.cellBg}; position:relative; vertical-align:top; }
+.day-cell.empty { background:${th.emptyBg}; }
+.day-cell.weekend { background:${th.weekendBg}; }
+.day-num { font-size:20px; font-weight:700; color:${th.dayNumCol}; margin-bottom:7px; line-height:1; }
+.day-num.sat { color:${th.satColor}; }
+.day-num.sun { color:${th.sunColor}; }
+.day-num.today { background:${sc.main}; color:#fff; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:17px; }
+.workers { display:flex; flex-direction:column; gap:5px; margin-top:2px; }
+.worker-chip { background:${sc.bg}; color:${sc.text}; font-size:15px; font-weight:600; border-radius:5px; padding:4px 7px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:4px; }
+.worker-chip .type-badge { font-size:12px; background:${sc.main}33; color:${sc.main}; border-radius:3px; padding:1px 4px; font-weight:700; }
+.no-staff { color:${th.noStaff}; font-size:15px; margin-top:10px; text-align:center; }
+</style></head><body>
+<div class="cal-wrap" id="calRoot">
+  <div class="cal-header">
+    <div>
+      <div class="cal-title">${monthLabel}　班表</div>
+      <div class="cal-store">${store.name}</div>
+      <div class="cal-brand">THE food co. 同興實業</div>
+    </div>
+    <div style="font-size:40px;opacity:0.25;">📅</div>
+  </div>
+  <div class="dow-row">
+    ${dowHeaders.map((h,i) => `<div class="dow-cell${i===5?' sat':i===6?' sun':''}">${h}</div>`).join('')}
+  </div>`;
+
+  for (const week of weeks) {
+    html += `<div class="week-row">`;
+    for (let col = 0; col < 7; col++) {
+      const cell = week[col];
+      if (!cell) {
+        html += `<div class="day-cell empty"></div>`;
+        continue;
+      }
+      const isSat = col === 5;
+      const isSun = col === 6;
+      const isWeekendDay = isSat || isSun;
+      const numClass = isSat ? 'sat' : isSun ? 'sun' : '';
+      const workersHTML = cell.workers.length > 0
+        ? cell.workers.map(w => `<div class="worker-chip">${w.name}${w.type ? `<span class="type-badge">${w.type}</span>` : ''}</div>`).join('')
+        : `<div class="no-staff">—</div>`;
+      html += `
+        <div class="day-cell${isWeekendDay ? ' weekend' : ''}">
+          <div class="day-num ${numClass}">${cell.d}</div>
+          <div class="workers">${workersHTML}</div>
+        </div>`;
+    }
+    html += `</div>`;
+  }
+
+  html += `</div></body></html>`;
+  return html;
+}
+
+async function exportStoreImage(storeId) {
+  const store = STORES.find(s => s.id === storeId);
+
+  // Show loading toast
+  const toast = document.createElement('div');
+  toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e222e;border:1px solid rgba(255,255,255,0.1);color:#e8eaf0;padding:12px 24px;border-radius:10px;font-size:14px;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.4);';
+  toast.textContent = `⏳ 正在產生 ${store.name} 班表圖片...`;
+  document.body.appendChild(toast);
+
+  await new Promise(r => setTimeout(r, 50));
+
+  try {
+    // Build calendar HTML in an offscreen iframe
+    const calHTML = buildCalendarHTML(storeId);
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;left:-9999px;top:0;width:1080px;height:2000px;border:none;';
+    document.body.appendChild(iframe);
+
+    await new Promise(resolve => {
+      iframe.onload = resolve;
+      iframe.srcdoc = calHTML;
+    });
+
+    // Wait for fonts
+    await new Promise(r => setTimeout(r, 800));
+
+    const calRoot = iframe.contentDocument.getElementById('calRoot');
+    const isLightExport = document.body.classList.contains('light-mode');
+    const canvas = await html2canvas(calRoot, {
+      scale: 3,
+      useCORS: true,
+      backgroundColor: isLightExport ? '#f4f5f7' : '#12141f',
+      width: 1080,
+      logging: false,
+      allowTaint: true,
+    });
+
+    document.body.removeChild(iframe);
+
+    // Download
+    const a = document.createElement('a');
+    a.download = `班表_${state.year}_${String(state.month).padStart(2,'0')}_${store.name}.png`;
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+
+    toast.style.background = '#1a2e1e';
+    toast.style.color = '#6fcf97';
+    toast.textContent = `✅ ${store.name} 班表圖片已下載！`;
+    setTimeout(() => toast.remove(), 2500);
+  } catch(e) {
+    document.body.removeChild(document.querySelector('iframe'));
+    toast.style.color = '#ef5b5b';
+    toast.textContent = `❌ 產生失敗：${e.message}`;
+    setTimeout(() => toast.remove(), 3000);
+    console.error(e);
+  }
+}
+
+// ============================================================
+// INIT
+// ============================================================
+
+async function init() {
+  applyTheme();
+  render(); // render shell immediately
+  await loadState();        // detect API availability first
+  await loadWhoami();       // then load user (knows if fallback mode)
+  render(); // re-render with real data
+}
+
+init();
+</script>
+</body>
+</html>

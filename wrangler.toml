@@ -1,0 +1,7 @@
+name = "shift-scheduler"
+compatibility_date = "2024-01-01"
+pages_build_output_dir = "public"
+
+[[kv_namespaces]]
+binding = "SCHEDULER_KV"
+id = "34400ac2c37847daa3c3977390095416"
