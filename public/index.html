@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>門市排班系統 v2.7</title>
+<title>門市排班系統 v2.8</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -485,8 +485,15 @@ let currentUser = { email: '', name: '' };
 let _saveTimer = null;
 let _saving = false;
 let _lastSaveTime = 0;
-let _useLocalFallback = false; // true when running locally without Pages Functions
-let _savePromise = null; // tracks in-flight API save
+let _useLocalFallback = false; // localStorage fallback（僅限本機開發）
+let _savePromise = null;       // tracks in-flight API save
+let _dirty = false;            // 有變更尚未確認寫入雲端
+let _loadingState = false;     // 正在載入雲端資料（切月中），期間禁止儲存
+let _pendingForce = false;     // 下一次儲存帶 force=1（清除排班等刻意清空操作）
+let _monthMeta = { updatedAt: null, updatedBy: null }; // 目前月份最後更新資訊
+
+// localStorage 降級只允許本機開發環境，正式環境絕不靜默降級
+const IS_LOCAL_DEV = ['localhost', '127.0.0.1'].includes(location.hostname);
 
 // ── Store sync ───────────────────────────────────────────────
 
@@ -539,15 +546,62 @@ function saveStateToLocalStorage() {
   } catch(e) {}
 }
 
+// ── 強化版 fetch：驗證回應必須是 JSON ──
+// Zero Trust 登入過期時，API 會回傳 Access 登入頁（HTML、狀態碼 200），
+// 舊版程式誤判為成功。這裡以 content-type 區分，並分類錯誤型態。
+async function apiFetch(url, options = {}) {
+  let res;
+  try {
+    res = await fetch(url, { cache: 'no-store', ...options });
+  } catch (e) {
+    const err = new Error('網路連線失敗');
+    err.kind = 'network';
+    throw err;
+  }
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    // 收到 HTML → Cloudflare Access 登入頁 → session 已過期
+    const err = new Error('登入已逾時');
+    err.kind = 'auth';
+    throw err;
+  }
+  const body = await res.json();
+  if (!res.ok || body.ok === false) {
+    const err = new Error(body.message || body.error || `HTTP ${res.status}`);
+    err.kind = (res.status === 409) ? 'blocked' : 'server';
+    err.status = res.status;
+    throw err;
+  }
+  return body;
+}
+
+function showAuthExpiredModal() {
+  // 直接蓋版提示，不允許在過期狀態下繼續編輯（編輯了也存不進去）
+  if (document.getElementById('authExpiredOverlay')) return;
+  const ov = document.createElement('div');
+  ov.id = 'authExpiredOverlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);z-index:10000;display:flex;align-items:center;justify-content:center;';
+  ov.innerHTML = `
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:32px;max-width:400px;text-align:center;">
+      <div style="font-size:40px;margin-bottom:12px;">🔐</div>
+      <h2 style="font-size:17px;margin-bottom:10px;">登入已逾時</h2>
+      <p style="font-size:13px;color:var(--text2);line-height:1.7;margin-bottom:20px;">
+        Cloudflare 驗證已過期，目前的變更<b style="color:var(--danger);">無法儲存至雲端</b>。<br>
+        請重新整理頁面完成驗證後再繼續操作。
+      </p>
+      <button class="btn btn-primary" style="width:100%;" onclick="location.reload()">🔄 重新整理並登入</button>
+    </div>`;
+  document.body.appendChild(ov);
+}
+
 async function loadState() {
   if (_useLocalFallback) {
     loadStateFromLocalStorage();
     return;
   }
   try {
-    const res = await fetch(`/api/state?month=${monthKey()}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { data } = await res.json();
+    const body = await apiFetch(`/api/state?month=${monthKey()}`);
+    const data = body.data;
     if (data) {
       if (!data.storeSettings) data.storeSettings = DEFAULT_STATE.storeSettings;
       if (!data.constraints)   data.constraints   = DEFAULT_STATE.constraints;
@@ -555,32 +609,52 @@ async function loadState() {
       if (!data.conflictPairs) data.conflictPairs = [];
       state = { ...DEFAULT_STATE, ...data };
       syncStores();
+      _dirty = false; // 剛從雲端載入，狀態是乾淨的
+      _monthMeta = { updatedAt: body.monthUpdatedAt || null, updatedBy: body.monthUpdatedBy || null };
     }
   } catch(e) {
-    // API not reachable → switch to localStorage fallback permanently
-    _useLocalFallback = true;
-    console.warn('API unavailable, switching to localStorage fallback:', e.message);
-    loadStateFromLocalStorage();
+    if (e.kind === 'auth') {
+      showAuthExpiredModal();
+      return;
+    }
+    if (IS_LOCAL_DEV) {
+      // 本機開發沒有 Pages Functions → 允許降級到 localStorage
+      _useLocalFallback = true;
+      console.warn('API unavailable (local dev), using localStorage fallback:', e.message);
+      loadStateFromLocalStorage();
+      return;
+    }
+    // 正式環境載入失敗：保留現有畫面並明確告知，絕不靜默切換資料來源
+    console.error('loadState failed:', e);
+    showToast(`❌ 雲端資料載入失敗：${e.message}（點擊「🔄 同步」重試）`, 'error', 8000);
+    setSaveIndicator('error');
   }
 }
 
-async function saveState() {
+async function saveState(opts = {}) {
+  if (opts.force) _pendingForce = true;
+  _dirty = true;
   if (_useLocalFallback) {
     saveStateToLocalStorage();
+    _dirty = false;
     setSaveIndicator('local');
     return;
   }
-  // Debounce: coalesce rapid saves into one request 400ms later
+  // Debounce: coalesce rapid saves into one request 500ms later
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(async () => {
+    _saveTimer = null;
     await _doSaveToAPI();
-  }, 400);
+  }, 500);
 }
 
 // Immediately upload state to API (no debounce). Returns a Promise.
-async function saveStateImmediate() {
+async function saveStateImmediate(opts = {}) {
+  if (opts.force) _pendingForce = true;
+  _dirty = true;
   if (_useLocalFallback) {
     saveStateToLocalStorage();
+    _dirty = false;
     setSaveIndicator('local');
     return;
   }
@@ -589,23 +663,59 @@ async function saveStateImmediate() {
   await _doSaveToAPI();
 }
 
+const SAVE_MAX_RETRIES = 3;
+
 async function _doSaveToAPI() {
+  if (_loadingState) return;            // 切月載入中不儲存（防止把空班表寫進新月份）
+  if (_savePromise) return _savePromise; // 已有儲存進行中，共用同一個 promise
   _saving = true;
   setSaveIndicator('saving');
   setRefreshBtnDisabled(true);
   const p = (async () => {
     try {
-      const res = await fetch(`/api/state?month=${monthKey()}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(state),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      _lastSaveTime = Date.now();
-      setSaveIndicator('saved');
-    } catch(e) {
-      console.error('saveState failed:', e);
+      let lastErr = null;
+      for (let attempt = 1; attempt <= SAVE_MAX_RETRIES; attempt++) {
+        try {
+          const forceParam = _pendingForce ? '&force=1' : '';
+          const body = await apiFetch(`/api/state?month=${monthKey()}${forceParam}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(state),
+          });
+          // 到這裡代表後端確認寫入成功（body.ok === true）
+          _dirty = false;
+          _pendingForce = false;
+          _lastSaveTime = Date.now();
+          _monthMeta = { updatedAt: body.savedAt, updatedBy: body.savedBy };
+          setSaveIndicator('saved');
+          showToast('✅ 已儲存至雲端', 'success', 1600);
+          return;
+        } catch(e) {
+          lastErr = e;
+          if (e.kind === 'auth') {
+            setSaveIndicator('error');
+            showAuthExpiredModal();
+            return;
+          }
+          if (e.kind === 'blocked') {
+            // 後端阻止了「空資料覆蓋非空資料」
+            setSaveIndicator('error');
+            if (confirm(`⛔ ${e.message}\n\n確定要以目前內容覆寫雲端資料嗎？\n（按「取消」則放棄這次儲存，建議先按「🔄 同步」拉回雲端資料）`)) {
+              _pendingForce = true;
+              continue; // 帶 force=1 重試
+            }
+            return;
+          }
+          // network / server 錯誤 → 指數退避重試
+          if (attempt < SAVE_MAX_RETRIES) {
+            await new Promise(r => setTimeout(r, attempt * 1200));
+          }
+        }
+      }
+      // 重試全部失敗
+      console.error('saveState failed after retries:', lastErr);
       setSaveIndicator('error');
+      showToast(`❌ 儲存失敗（已重試 ${SAVE_MAX_RETRIES} 次）：${lastErr.message} — 資料尚未上傳，請勿關閉頁面`, 'error', 0, { retry: true });
     } finally {
       _saving = false;
       _savePromise = null;
@@ -614,6 +724,49 @@ async function _doSaveToAPI() {
   })();
   _savePromise = p;
   await p;
+}
+
+// ── Toast 提示系統 ──────────────────────────────────────────
+// duration 0 = 常駐直到手動關閉；opts.retry = 顯示「重試儲存」按鈕
+function showToast(msg, type = 'info', duration = 2500, opts = {}) {
+  let box = document.getElementById('toastBox');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'toastBox';
+    box.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9998;display:flex;flex-direction:column;gap:8px;align-items:center;max-width:90vw;';
+    document.body.appendChild(box);
+  }
+  // 同類型 toast 不重複堆疊（例如連續儲存成功）
+  const existing = box.querySelector(`[data-toast-type="${type}"]`);
+  if (existing) existing.remove();
+
+  const colors = {
+    success: 'background:#1a2e1e;border:1px solid rgba(111,207,151,0.4);color:#6fcf97;',
+    error:   'background:#2e1a1a;border:1px solid rgba(239,91,91,0.5);color:#ef8f8f;',
+    info:    'background:#1e222e;border:1px solid rgba(255,255,255,0.12);color:#e8eaf0;',
+  };
+  const el = document.createElement('div');
+  el.setAttribute('data-toast-type', type);
+  el.style.cssText = `${colors[type] || colors.info}padding:11px 18px;border-radius:10px;font-size:13px;box-shadow:0 4px 20px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;line-height:1.5;`;
+  const span = document.createElement('span');
+  span.textContent = msg;
+  el.appendChild(span);
+  if (opts.retry) {
+    const btn = document.createElement('button');
+    btn.textContent = '🔄 重試儲存';
+    btn.style.cssText = 'background:rgba(255,255,255,0.12);border:none;color:inherit;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;white-space:nowrap;';
+    btn.onclick = () => { el.remove(); saveStateImmediate(); };
+    el.appendChild(btn);
+  }
+  if (duration === 0 || opts.retry) {
+    const close = document.createElement('button');
+    close.textContent = '✕';
+    close.style.cssText = 'background:none;border:none;color:inherit;cursor:pointer;font-size:13px;opacity:0.6;padding:0 2px;';
+    close.onclick = () => el.remove();
+    el.appendChild(close);
+  }
+  box.appendChild(el);
+  if (duration > 0) setTimeout(() => el.remove(), duration);
 }
 
 function setRefreshBtnDisabled(disabled) {
@@ -987,7 +1140,7 @@ function render() {
         <img src="data:image/png;base64,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" alt="Logo" style="height:38px;border-radius:6px;" />
         <div style="display:flex;flex-direction:column;">
           <span style="font-size:20px;font-weight:700;letter-spacing:-0.5px;">THE food co. <span style="color:var(--accent);">員工排班系統</span></span>
-          <span style="font-size:10px;color:var(--text3);font-weight:400;margin-top:-2px;">同興實業 ─ 門市班表管理工具 v2.7</span>
+          <span style="font-size:10px;color:var(--text3);font-weight:400;margin-top:-2px;">同興實業 ─ 門市班表管理工具 v2.8</span>
         </div>
       </h1>
       <div class="header-actions">
@@ -1056,6 +1209,8 @@ function renderScheduleTab() {
           ${state.year} / ${String(state.month).padStart(2,'0')}
         </span>
         <button class="btn btn-ghost btn-sm" onclick="changeMonth(1)">▶</button>
+        <button class="btn btn-ghost btn-sm" onclick="showMonthHistoryModal()">📚 歷史班表</button>
+        ${_monthMeta.updatedAt ? `<span style="font-size:11px;color:var(--text3);">本月最後更新：${new Date(_monthMeta.updatedAt).toLocaleString('zh-TW',{hour12:false})}${_monthMeta.updatedBy ? `（${_monthMeta.updatedBy.split('@')[0]}）` : ''}</span>` : ''}
       </div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-primary btn-lg" onclick="autoSchedule()">⚡ 自動排班</button>
@@ -1317,12 +1472,74 @@ function assignBothSlots(empId, keys) {
 }
 
 async function changeMonth(delta) {
-  state.month += delta;
+  await gotoMonth(state.year, state.month + delta);
+}
+
+// 切換到指定年月。關鍵防護：
+// 1. 先 flush 尚未送出的儲存（舊版沒做 → 延遲儲存會把空班表寫進新月份，洗掉雲端資料）
+// 2. 載入期間鎖定 _loadingState，任何儲存都會被擋下
+async function gotoMonth(year, month) {
+  // 先把未儲存的變更送出，確認寫入雲端後才切換
+  if (_saveTimer || _saving || _dirty) {
+    setSaveIndicator('saving');
+    try { await saveStateImmediate(); } catch(e) {}
+    if (_dirty) {
+      if (!confirm('⚠️ 目前的變更尚未成功儲存至雲端，切換月份將遺失這些變更。\n\n仍要切換嗎？')) return;
+      _dirty = false; // 使用者選擇放棄變更
+    }
+  }
+  _loadingState = true;
+  state.year = year;
+  state.month = month;
   if (state.month > 12) { state.month = 1; state.year++; }
   if (state.month < 1) { state.month = 12; state.year--; }
   state.assignments = {};
   render();
-  await loadState();
+  try {
+    await loadState();
+  } finally {
+    _loadingState = false;
+  }
+  render();
+}
+
+// ── 歷史班表查詢 ─────────────────────────────────────────────
+async function showMonthHistoryModal() {
+  modal = `<h2>📚 歷史班表</h2><p style="font-size:13px;color:var(--text2);margin-top:8px;">載入中…</p>`;
+  render();
+  let months = [];
+  try {
+    const body = await apiFetch('/api/months');
+    months = body.months || [];
+  } catch(e) {
+    modal = `<h2>📚 歷史班表</h2>
+      <p style="font-size:13px;color:var(--danger);margin-top:8px;">載入失敗：${e.message}</p>
+      <div style="margin-top:16px;text-align:right;"><button class="btn btn-ghost" onclick="closeModal()">關閉</button></div>`;
+    render();
+    return;
+  }
+  const curMk = monthKey();
+  modal = `
+    <h2>📚 歷史班表</h2>
+    <p style="font-size:12px;color:var(--text3);margin-top:6px;">雲端目前保存的所有月份，點擊即可調閱。</p>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:14px;max-height:50vh;overflow-y:auto;">
+      ${months.length === 0 ? '<p style="font-size:13px;color:var(--text3);">雲端尚無任何月份的排班資料。</p>' : ''}
+      ${months.map(m => {
+        const [y, mo] = m.month.split('-');
+        const isCur = m.month === curMk;
+        const upd = m.updatedAt ? new Date(m.updatedAt).toLocaleString('zh-TW', {hour12:false}) : '—';
+        return `
+        <div onclick="closeModal();gotoMonth(${Number(y)},${Number(mo)});"
+          style="display:flex;align-items:center;gap:12px;padding:11px 14px;background:var(--bg3);border-radius:8px;cursor:pointer;border:1px solid ${isCur?'var(--accent)':'transparent'};">
+          <span style="font-weight:700;font-family:'JetBrains Mono',monospace;font-size:14px;">${y} 年 ${Number(mo)} 月</span>
+          ${isCur ? '<span style="font-size:10px;background:var(--accent);color:#fff;padding:2px 8px;border-radius:10px;">目前</span>' : ''}
+          <span style="margin-left:auto;font-size:11px;color:var(--text3);">${m.count} 筆排班</span>
+          <span style="font-size:11px;color:var(--text3);">更新：${upd}</span>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="margin-top:16px;text-align:right;"><button class="btn btn-ghost" onclick="closeModal()">關閉</button></div>
+  `;
   render();
 }
 
@@ -1340,13 +1557,17 @@ async function refreshData() {
   setSaveIndicator('saving');
   await loadState();
   render();
-  setSaveIndicator('saved');
+  if (!_dirty) {
+    _lastSaveTime = Date.now();
+    setSaveIndicator('saved');
+    showToast('🔄 已同步最新雲端資料', 'success', 1600);
+  }
 }
 
 function clearSchedule() {
   if (confirm('確定清除所有排班資料？（員工可排班日不受影響）')) {
     state.assignments = {};
-    saveState();
+    saveState({ force: true }); // 刻意清空，帶 force 跳過後端空覆寫防護
     render();
   }
 }
@@ -1593,7 +1814,8 @@ function deleteEmployee(empId) {
   }
   // Remove from conflict pairs
   state.conflictPairs = state.conflictPairs.filter(([a,b]) => a !== empId && b !== empId);
-  saveState();
+  // 刪到最後一位員工時屬刻意清空，帶 force 跳過後端防護
+  saveState({ force: state.employees.length === 0 });
   render();
 }
 
@@ -2014,7 +2236,7 @@ async function resetAll() {
   if (!confirm('確定要重設所有資料？此操作不可復原。')) return;
   state = { ...DEFAULT_STATE, stores: [...DEFAULT_STORES] };
   STORES = state.stores;
-  await saveState();
+  await saveStateImmediate({ force: true }); // 刻意重設，帶 force 跳過後端防護
   render();
 }
 
@@ -2109,6 +2331,24 @@ function renderChangelogTab() {
   const tc = document.getElementById('tabContent');
 
   const logs = [
+    {
+      version: 'v2.8',
+      date: '2026-07-16',
+      title: '重大修復：班表儲存可靠性全面強化',
+      items: [
+        '🚨 修復「假儲存成功」：Cloudflare 登入逾時後，舊版會顯示「已同步」但資料實際上沒有寫入雲端。現在系統會驗證伺服器的真實回應，逾時立即跳出「重新登入」提示並鎖定畫面',
+        '🚨 修復切換月份洗掉資料：編輯後 0.5 秒內按 ◀▶ 切月，舊版會把空白班表寫進新月份、覆蓋雲端資料。現在切月前一定先完成儲存',
+        '🛡 空資料覆寫防護：伺服器會拒絕「用空班表覆蓋已有排班的月份」及「用空員工名單覆蓋現有名單」，防止誤操作毀損資料（刻意清除功能不受影響）',
+        '💾 自動備份：每次覆寫前，舊資料自動備份到雲端（保留一個世代），誤刪可救回',
+        '🔁 儲存自動重試：網路不穩時自動重試 3 次（指數退避），全部失敗才回報錯誤',
+        '✅ 明確的成功提示：每次儲存成功顯示「已儲存至雲端」彈出通知',
+        '❌ 明確的失敗提示：儲存失敗顯示常駐錯誤訊息與「重試儲存」按鈕，不會再誤以為已儲存',
+        '⚠️ 離開頁面警告：尚有未儲存變更時，關閉或重新整理頁面會先跳出確認',
+        '📚 歷史班表查詢：新增「歷史班表」按鈕，列出雲端所有月份（含筆數與最後更新時間），點擊即可調閱',
+        '🕐 最後更新資訊：排班表頁顯示本月資料的最後更新時間與更新者',
+        '🔧 正式環境不再靜默降級：舊版 API 連線失敗會偷偷改用瀏覽器本機儲存（造成「資料消失」假象），現在只有本機開發環境才允許降級',
+      ],
+    },
     {
       version: 'v2.7',
       date: '2026-05-05',
@@ -2300,7 +2540,7 @@ function exportJSON() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `排班_${state.year}_${String(state.month).padStart(2,'0')}_v2.7.json`;
+  a.download = `排班_${state.year}_${String(state.month).padStart(2,'0')}_v2.8.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -2317,7 +2557,8 @@ function importJSON() {
       const data = JSON.parse(text);
       if (data.employees && data.storeSettings) {
         state = { ...DEFAULT_STATE, ...data };
-        await saveStateImmediate(); // use immediate upload, not debounced
+        syncStores();
+        await saveStateImmediate({ force: true }); // 匯入屬刻意覆寫
         render();
       } else {
         alert('檔案格式不正確');
@@ -2593,6 +2834,14 @@ async function init() {
   await loadWhoami();       // then load user (knows if fallback mode)
   render(); // re-render with real data
 }
+
+// 尚有未儲存的變更時，關閉/重新整理頁面前警告
+window.addEventListener('beforeunload', (e) => {
+  if (_dirty || _saveTimer || _saving) {
+    e.preventDefault();
+    e.returnValue = '尚有變更未儲存至雲端，確定要離開嗎？';
+  }
+});
 
 init();
 </script>
