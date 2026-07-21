@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>門市排班系統 v2.8</title>
+<title>門市排班系統 v2.9</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -460,6 +460,36 @@ const SHIFT_TYPES = {
   PM:   { id:'PM',   label:'晚班', short:'晚' },
 };
 
+// 員工身分別。regular=正式員工（可帶新人），new=新進員工，intern=實習生
+const ROLES = {
+  regular: { id:'regular', label:'正式員工', short:'正職', icon:'🟢', color:'var(--success)', bg:'var(--successbg)' },
+  new:     { id:'new',     label:'新進員工', short:'新進', icon:'🔵', color:'var(--accent)',  bg:'var(--store1bg)' },
+  intern:  { id:'intern',  label:'實習生',   short:'實習', icon:'🟡', color:'var(--warn)',    bg:'var(--warnbg)' },
+};
+function empRole(e) { return (e && ROLES[e.role]) ? e.role : 'regular'; }
+function roleOfId(id) { const e = state.employees.find(x => x.id === id); return empRole(e); }
+// 身分標籤 HTML；size:'sm' 用於排班格的小標
+function roleBadge(role, size) {
+  const r = ROLES[role] || ROLES.regular;
+  if (size === 'sm') {
+    return `<span title="${r.label}" style="font-size:8px;padding:0 3px;border-radius:3px;background:${r.bg};color:${r.color};font-weight:600;white-space:nowrap;">${r.short}</span>`;
+  }
+  return `<span style="font-size:11px;padding:1px 8px;border-radius:10px;background:${r.bg};color:${r.color};font-weight:600;white-space:nowrap;">${r.icon} ${r.label}</span>`;
+}
+
+// ── 搭班偏好（buddyPairs）輔助 ──
+function buddyIdsOf(id) {
+  const out = [];
+  for (const [a, b] of (state.buddyPairs || [])) {
+    if (a === id) out.push(b);
+    else if (b === id) out.push(a);
+  }
+  return out;
+}
+function buddyNamesFor(id) {
+  return buddyIdsOf(id).map(bid => state.employees.find(e => e.id === bid)?.name || '（已刪除）');
+}
+
 const DEFAULT_STATE = {
   year: new Date().getFullYear(),
   month: new Date().getMonth() + 1,
@@ -476,7 +506,8 @@ const DEFAULT_STATE = {
     defaultMaxShifts: 16,
   },
   assignments: {},  // "YYYY-MM-DD_storeId_shiftType": [empId, ...]
-  conflictPairs: [], // [[empId1, empId2], ...]
+  conflictPairs: [], // [[empId1, empId2], ...] 不可同班
+  buddyPairs: [],    // [[empId1, empId2], ...] 優先同班（搭班偏好）
   tab: 'schedule',
 };
 
@@ -533,6 +564,7 @@ function loadStateFromLocalStorage() {
     if (!merged.constraints)   merged.constraints   = DEFAULT_STATE.constraints;
     if (!merged.assignments)   merged.assignments   = {};
     if (!merged.conflictPairs) merged.conflictPairs = [];
+    if (!merged.buddyPairs)    merged.buddyPairs    = [];
     state = merged;
     syncStores();
   } catch(e) {}
@@ -607,6 +639,7 @@ async function loadState() {
       if (!data.constraints)   data.constraints   = DEFAULT_STATE.constraints;
       if (!data.assignments)   data.assignments   = {};
       if (!data.conflictPairs) data.conflictPairs = [];
+      if (!data.buddyPairs)    data.buddyPairs    = [];
       state = { ...DEFAULT_STATE, ...data };
       syncStores();
       _dirty = false; // 剛從雲端載入，狀態是乾淨的
@@ -997,6 +1030,13 @@ function getViolations() {
           const nameB = state.employees.find(e=>e.id===b)?.name || b;
           v.push({ type:'conflict', msg:`${dateKey(d)} ${store.short} ${SHIFT_TYPES[slot.type].label}：${nameA} 與 ${nameB} 不可同班` });
         }
+        // 新進員工班別無正式員工帶領
+        if (assigned.length > 0) {
+          const roles = assigned.map(id => roleOfId(id));
+          if (roles.includes('new') && !roles.includes('regular')) {
+            v.push({ type:'newbieNoMentor', msg:`${dateKey(d)} ${store.short} ${SHIFT_TYPES[slot.type].label}：此班別有新進員工，但沒有正式員工一起上班，請確認班表安排。` });
+          }
+        }
       }
     }
   }
@@ -1008,6 +1048,7 @@ function getViolations() {
 // ============================================================
 
 function autoSchedule() {
+  if (!confirm('確定要重新自動排班嗎？目前班表可能會被重新更動。')) return;
   // Clear existing
   state.assignments = {};
   const totalDays = getDaysInMonth(state.year, state.month);
@@ -1096,34 +1137,58 @@ function autoSchedule() {
       return !currentAssigned.some(otherId => isConflictPair(e.id, otherId));
     });
 
-    // Sort: preferred store first, then fewer shifts (balance)
-    candidates.sort((a,b) => {
-      // Preferred store bonus: single preferredStore field takes priority
-      const prefA = a.preferredStore === slot.storeId ? 0 : 1;
-      const prefB = b.preferredStore === slot.storeId ? 0 : 1;
-      if (prefA !== prefB) return prefA - prefB;
-      // Then balance by shift count
-      const sa = empShiftDays[a.id].size;
-      const sb = empShiftDays[b.id].size;
-      return sa - sb;
-    });
+    // 逐位挑選：每挑一位就依「平衡 + 偏好門市 + 搭班偏好 + 帶新人」重新評分。
+    // 這樣「此班已有新進員工」時，下一個座位會優先補進正式員工。
+    const picks = [];
+    let pool = candidates.slice();
+    while (picks.length < needed && pool.length > 0) {
+      const pickedRoles = picks.map(id => roleOfId(id));
+      const hasRegular = pickedRoles.includes('regular');
+      const hasNew = pickedRoles.includes('new');
+      const seatsAfter = needed - picks.length - 1; // 挑完這位後還剩幾個空位
 
-    const assigned = [];
-    for (let i = 0; i < candidates.length && assigned.length < needed; i++) {
-      // Check this candidate doesn't conflict with anyone already picked for this slot
-      const conflictsWithPicked = assigned.some(pickedId => isConflictPair(candidates[i].id, pickedId));
-      if (conflictsWithPicked) continue;
-      assigned.push(candidates[i].id);
-      empShiftDays[candidates[i].id].add(dk);
-      empSlotCount[candidates[i].id]++;
+      let best = null, bestScore = -Infinity;
+      for (const c of pool) {
+        // 不能與已挑選者互斥
+        if (picks.some(pid => isConflictPair(c.id, pid))) continue;
+        let score = 0;
+        // 平衡：目前班數越少越優先
+        score -= empShiftDays[c.id].size * 2;
+        // 偏好門市
+        if (c.preferredStore === slot.storeId) score += 6;
+        // 搭班偏好：夥伴已在此班 > 夥伴當天已有班
+        const buddies = buddyIdsOf(c.id);
+        if (buddies.some(bid => picks.includes(bid))) score += 40;
+        else if (buddies.some(bid => empShiftDays[bid] && empShiftDays[bid].has(dk))) score += 15;
+        // 帶新人規則（正式員工 ↔ 新進員工）
+        const r = roleOfId(c.id);
+        if (r === 'regular' && hasNew && !hasRegular) score += 45; // 此班有新進但無正職 → 優先補正職帶領
+        else if (r === 'regular' && hasNew) score += 12;
+        if (r === 'new' && !hasRegular) {
+          if (seatsAfter <= 0) score -= 30; // 挑完就沒機會再補正職 → 避免新進落單／整班全新進
+          else score -= 10;                 // 先讓正職進來
+        }
+        if (score > bestScore) { bestScore = score; best = c; }
+      }
+      if (!best) break;
+      picks.push(best.id);
+      empShiftDays[best.id].add(dk);
+      empSlotCount[best.id]++;
+      pool = pool.filter(x => x.id !== best.id);
     }
-    if (assigned.length > 0) {
-      state.assignments[slot.key] = assigned;
+    if (picks.length > 0) {
+      state.assignments[slot.key] = picks;
     }
   }
 
   saveState();
   render();
+  const newbieWarnings = getViolations().filter(v => v.type === 'newbieNoMentor');
+  if (newbieWarnings.length > 0) {
+    showToast(`⚠️ 有 ${newbieWarnings.length} 個班別的新進員工沒有正式員工一起上班，請於違規提醒中確認`, 'error', 6000);
+  } else {
+    showToast('✅ 自動排班完成', 'success', 1800);
+  }
 }
 
 // ============================================================
@@ -1140,7 +1205,7 @@ function render() {
         <img src="data:image/png;base64,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" alt="Logo" style="height:38px;border-radius:6px;" />
         <div style="display:flex;flex-direction:column;">
           <span style="font-size:20px;font-weight:700;letter-spacing:-0.5px;">THE food co. <span style="color:var(--accent);">員工排班系統</span></span>
-          <span style="font-size:10px;color:var(--text3);font-weight:400;margin-top:-2px;">同興實業 ─ 門市班表管理工具 v2.8</span>
+          <span style="font-size:10px;color:var(--text3);font-weight:400;margin-top:-2px;">同興實業 ─ 門市班表管理工具 v2.9</span>
         </div>
       </h1>
       <div class="header-actions">
@@ -1214,6 +1279,8 @@ function renderScheduleTab() {
       </div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-primary btn-lg" onclick="autoSchedule()">⚡ 自動排班</button>
+        <button class="btn btn-primary btn-sm" onclick="saveVersion()">💾 儲存班表</button>
+        <button class="btn btn-ghost btn-sm" onclick="undoVersion()">↩ 返回上一版本</button>
         <button class="btn btn-ghost btn-sm" onclick="showExportImageModal()">📷 匯出圖片</button>
         <button class="btn btn-danger btn-sm" onclick="clearSchedule()">清除排班</button>
       </div>
@@ -1251,7 +1318,7 @@ function renderScheduleTab() {
   // Violations
   if (violations.length > 0) {
     const criticalTypes = ['over','consecutive','unavailable','multiStore','conflict'];
-    const warnTypes = ['under','overAvail','understaffed'];
+    const warnTypes = ['under','overAvail','understaffed','newbieNoMentor'];
     const critCount = violations.filter(v => criticalTypes.includes(v.type)).length;
     const warnCount = violations.filter(v => warnTypes.includes(v.type)).length;
     html += `<div class="card no-print" style="border-color:rgba(239,91,91,0.3);">
@@ -1286,7 +1353,7 @@ function renderScheduleTab() {
   html += `<div class="card" style="margin-top:16px;">
     <div class="card-title">📊 員工排班統計</div>
     <table>
-      <tr><th>員工</th><th>排班天數</th><th>班次數</th><th>下限</th><th>上限</th><th>可上班天</th><th>最大連續</th><th>狀態</th></tr>
+      <tr><th>員工</th><th>身分</th><th>排班天數</th><th>班次數</th><th>下限</th><th>上限</th><th>可上班天</th><th>最大連續</th><th>狀態</th></tr>
       ${state.employees.map(e => {
         const sd = countShiftDays(e.id);
         const sc = countShifts(e.id);
@@ -1313,6 +1380,7 @@ function renderScheduleTab() {
         const statusCell = hasAny ? statusParts.join(' ') : '<span style="color:var(--success);">✅ 正常</span>';
         return `<tr>
           <td style="font-weight:500;">${e.name}</td>
+          <td>${roleBadge(empRole(e))}</td>
           <td style="font-family:'JetBrains Mono',monospace;${sd>availDays?'color:var(--warn);':''}">${sd}</td>
           <td style="font-family:'JetBrains Mono',monospace;">${sc}</td>
           <td style="font-family:'JetBrains Mono',monospace;color:var(--text3);">${minS}</td>
@@ -1346,7 +1414,7 @@ function renderStoreGrid(store, totalDays) {
 
   // Employee rows
   for (const emp of state.employees) {
-    html += `<div class="sg-cell name-cell">${emp.name}</div>`;
+    html += `<div class="sg-cell name-cell"><div style="display:flex;align-items:center;gap:4px;">${emp.name} ${roleBadge(empRole(emp),'sm')}</div></div>`;
     for (let d = 1; d <= totalDays; d++) {
       const avail = isEmployeeAvailable(emp, d);
       const dk = dateKey(d);
@@ -1572,6 +1640,43 @@ function clearSchedule() {
   }
 }
 
+// ── 版本快照：儲存班表 / 返回上一版本 ──────────────────────────
+async function saveVersion() {
+  if (_useLocalFallback) { alert('本機開發模式不支援版本快照。'); return; }
+  // 先確保目前變更已寫入雲端，版本快照才會包含最新內容
+  if (_saveTimer || _saving || _dirty) {
+    try { await saveStateImmediate(); } catch(e) {}
+    if (_dirty) { showToast('❌ 目前變更尚未成功儲存至雲端，請稍後再按一次', 'error', 4000); return; }
+  }
+  try {
+    await apiFetch(`/api/versions?month=${monthKey()}&action=save`, { method: 'POST' });
+    showToast('班表已儲存成功。', 'success', 2200);
+  } catch(e) {
+    if (e.kind === 'auth') { showAuthExpiredModal(); return; }
+    showToast(`❌ 儲存版本失敗：${e.message}`, 'error', 5000);
+  }
+}
+
+async function undoVersion() {
+  if (_useLocalFallback) { alert('本機開發模式不支援版本還原。'); return; }
+  if (!confirm('確定要返回上一個版本嗎？目前尚未儲存的更動可能會消失。')) return;
+  // 取消待送的儲存，避免還原後又把舊資料寫回雲端
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+  _dirty = false;
+  try {
+    await apiFetch(`/api/versions?month=${monthKey()}&action=undo`, { method: 'POST' });
+    // 還原成功 → 重新載入雲端資料（含被還原的 assignments）
+    _loadingState = true;
+    try { await loadState(); } finally { _loadingState = false; }
+    render();
+    showToast('↩ 已返回上一版本', 'success', 2200);
+  } catch(e) {
+    if (e.kind === 'auth') { showAuthExpiredModal(); return; }
+    if (e.status === 400) { showToast(`⚠️ ${e.message}`, 'error', 5000); return; }
+    showToast(`❌ 返回版本失敗：${e.message}`, 'error', 5000);
+  }
+}
+
 // ============================================================
 // EMPLOYEES TAB
 // ============================================================
@@ -1619,11 +1724,12 @@ function renderEmployeesTab() {
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;">
           <div>
-            <div style="font-size:15px;font-weight:600;margin-bottom:4px;">${emp.name}</div>
+            <div style="font-size:15px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:8px;">${emp.name} ${roleBadge(empRole(emp))}</div>
             <div style="font-size:12px;color:var(--text2);">
               班次範圍 ${minS}–${maxS} 天 ｜ 本月可排 ${availCount} 天
               ${storeModeLabel}
             </div>
+            ${buddyNamesFor(emp.id).length > 0 ? `<div style="font-size:11px;color:var(--accent);margin-top:4px;">🤝 優先搭班：${buddyNamesFor(emp.id).join('、')}</div>` : ''}
             ${conflictNames.length > 0 ? `<div style="font-size:11px;color:var(--danger);margin-top:4px;">🚫 不可同班：${conflictNames.join('、')}</div>` : ''}
           </div>
           <div style="display:flex;gap:6px;">
@@ -1660,6 +1766,7 @@ function addEmployee() {
   state.employees.push({
     id: 'emp_' + Date.now(),
     name: name.trim(),
+    role: 'regular',          // 'regular' | 'new' | 'intern'
     availability: [],
     minShifts: null,
     maxShifts: null,
@@ -1679,6 +1786,7 @@ function editEmployee(empId) {
   const maxS = emp.maxShifts ?? state.constraints.defaultMaxShifts;
   const sm = emp.storeMode || 'none';
   const sl = emp.storeList || emp.preferredStores || [];
+  const role = empRole(emp);
 
   modal = `
     <h2>編輯 — ${emp.name}</h2>
@@ -1686,6 +1794,18 @@ function editEmployee(empId) {
       <div>
         <label>姓名</label>
         <input id="editName" value="${emp.name}" />
+      </div>
+      <div>
+        <label>員工身分</label>
+        <div class="toggle-group" style="margin-top:4px;">
+          ${Object.values(ROLES).map(r => `
+            <button class="toggle-opt ${role===r.id?'active':''}" id="role_${r.id}"
+              onclick="document.querySelectorAll('[id^=role_]').forEach(b=>b.classList.remove('active'));this.classList.add('active')">
+              ${r.icon} ${r.label}
+            </button>
+          `).join('')}
+        </div>
+        <p style="font-size:11px;color:var(--text3);margin-top:6px;">「新進員工」自動排班時會優先安排正式員工一起上班帶領。</p>
       </div>
       <div class="grid-2">
         <div>
@@ -1788,6 +1908,8 @@ function saveEmployee(empId) {
   const emp = state.employees.find(e => e.id === empId);
   if (!emp) return;
   emp.name = document.getElementById('editName').value.trim() || emp.name;
+  const activeRole = document.querySelector('[id^=role_].active');
+  emp.role = activeRole ? activeRole.id.replace('role_', '') : (emp.role || 'regular');
   const minV = parseInt(document.getElementById('editMin').value);
   const maxV = parseInt(document.getElementById('editMax').value);
   emp.minShifts = isNaN(minV) ? null : minV;
@@ -1812,8 +1934,9 @@ function deleteEmployee(empId) {
   for (const [k, arr] of Object.entries(state.assignments)) {
     state.assignments[k] = arr.filter(id => id !== empId);
   }
-  // Remove from conflict pairs
+  // Remove from conflict pairs & buddy pairs
   state.conflictPairs = state.conflictPairs.filter(([a,b]) => a !== empId && b !== empId);
+  state.buddyPairs = (state.buddyPairs || []).filter(([a,b]) => a !== empId && b !== empId);
   // 刪到最後一位員工時屬刻意清空，帶 force 跳過後端防護
   saveState({ force: state.employees.length === 0 });
   render();
@@ -1949,6 +2072,47 @@ function renderSettingsTab() {
     </div>
   `;
 
+  // Buddy pairs section（搭班偏好）
+  html += `
+    <div class="card">
+      <div class="card-title" style="color:var(--accent);">🤝 搭班偏好（優先同班）</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:12px;">設定希望「優先安排在同一天同一班」的員工組合。自動排班會盡量將他們排在一起；若因休假、工時或人力限制無法安排，仍會依其他規則完成班表。</p>
+      ${(state.buddyPairs || []).length === 0 ? `
+        <div style="padding:16px;text-align:center;color:var(--text3);font-size:12px;">尚未設定搭班偏好</div>
+      ` : `
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;">
+          ${state.buddyPairs.map(([a,b], idx) => {
+            const nameA = state.employees.find(e=>e.id===a)?.name || '（已刪除）';
+            const nameB = state.employees.find(e=>e.id===b)?.name || '（已刪除）';
+            return `<div class="conflict-pair">
+              <div class="names">${nameA} <span class="vs" style="color:var(--accent);">🤝</span> ${nameB}</div>
+              <button class="btn btn-danger btn-sm" onclick="removeBuddyPair(${idx})">移除</button>
+            </div>`;
+          }).join('')}
+        </div>
+      `}
+      ${state.employees.length >= 2 ? `
+        <div class="conflict-add-row">
+          <div style="flex:1;">
+            <label>員工 A</label>
+            <select id="buddyA">
+              ${state.employees.map(e => `<option value="${e.id}">${e.name}</option>`).join('')}
+            </select>
+          </div>
+          <div style="flex:1;">
+            <label>員工 B</label>
+            <select id="buddyB">
+              ${state.employees.map((e,i) => `<option value="${e.id}" ${i===1?'selected':''}>${e.name}</option>`).join('')}
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="addBuddyPair()" style="margin-bottom:1px;">新增搭班</button>
+        </div>
+      ` : `
+        <p style="font-size:11px;color:var(--text3);">需至少 2 位員工才能設定搭班偏好。</p>
+      `}
+    </div>
+  `;
+
   // Store management card
   html += `
     <div class="card">
@@ -2040,15 +2204,18 @@ function updateConstraint(key, val) {
   saveState();
 }
 
+function pairExists(list, a, b) {
+  return list.some(([x,y]) => (x === a && y === b) || (x === b && y === a));
+}
+
 function addConflictPair() {
   const a = document.getElementById('conflictA').value;
   const b = document.getElementById('conflictB').value;
   if (a === b) { alert('請選擇兩位不同的員工'); return; }
-  // Check if pair already exists
-  const exists = state.conflictPairs.some(([x,y]) =>
-    (x === a && y === b) || (x === b && y === a)
-  );
-  if (exists) { alert('此互斥組合已存在'); return; }
+  if (pairExists(state.conflictPairs, a, b)) { alert('此互斥組合已存在'); return; }
+  if (pairExists(state.buddyPairs || [], a, b)) {
+    alert('這兩位已設為「搭班偏好」，不能同時設為互斥。請先移除搭班偏好。'); return;
+  }
   state.conflictPairs.push([a, b]);
   saveState();
   render();
@@ -2056,6 +2223,26 @@ function addConflictPair() {
 
 function removeConflictPair(idx) {
   state.conflictPairs.splice(idx, 1);
+  saveState();
+  render();
+}
+
+function addBuddyPair() {
+  const a = document.getElementById('buddyA').value;
+  const b = document.getElementById('buddyB').value;
+  if (a === b) { alert('請選擇兩位不同的員工'); return; }
+  if (pairExists(state.buddyPairs || [], a, b)) { alert('此搭班偏好已存在'); return; }
+  if (pairExists(state.conflictPairs, a, b)) {
+    alert('這兩位已設為「互斥（不可同班）」，不能同時設為搭班偏好。請先移除互斥組合。'); return;
+  }
+  if (!state.buddyPairs) state.buddyPairs = [];
+  state.buddyPairs.push([a, b]);
+  saveState();
+  render();
+}
+
+function removeBuddyPair(idx) {
+  state.buddyPairs.splice(idx, 1);
   saveState();
   render();
 }
@@ -2332,6 +2519,21 @@ function renderChangelogTab() {
 
   const logs = [
     {
+      version: 'v2.9',
+      date: '2026-07-21',
+      title: '員工身分、搭班偏好、班表版本管理',
+      items: [
+        '⚡ 自動排班確認：按下「自動排班」會先跳出確認視窗，避免誤按覆蓋已排好的班表',
+        '💾 儲存班表：排班頁新增「儲存班表」按鈕，可將目前版本存為還原點，成功顯示「班表已儲存成功。」',
+        '↩ 返回上一版本：新增「返回上一版本」按鈕，可回到上一次儲存的班表（附確認提示），最多保留 10 個版本',
+        '👤 員工身分：員工可設定為「正式員工／新進員工／實習生」，員工卡片、排班表、統計表都會顯示身分標籤',
+        '🤝 搭班偏好：門市設定新增「搭班偏好」，可指定兩位員工優先排在同一天同一班（軟性優先，排不進去仍會完成班表）',
+        '🧑‍🏫 帶新人排班：自動排班會優先安排正式員工與新進員工同班，盡量避免新進員工單獨上班或整班皆為新進',
+        '⚠️ 帶人提醒：若某班別有新進員工卻沒有正式員工一起上班，違規提醒會顯示警告請管理者確認',
+        '📌 每月班表持續自動儲存、關閉／重整／切換月份都不會遺失（延續 v2.8 的雲端儲存強化）',
+      ],
+    },
+    {
       version: 'v2.8',
       date: '2026-07-16',
       title: '重大修復：班表儲存可靠性全面強化',
@@ -2540,7 +2742,7 @@ function exportJSON() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `排班_${state.year}_${String(state.month).padStart(2,'0')}_v2.8.json`;
+  a.download = `排班_${state.year}_${String(state.month).padStart(2,'0')}_v2.9.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
