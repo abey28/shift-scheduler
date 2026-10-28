@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>門市排班系統 v2.9</title>
+<title>門市排班系統 v2.10</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -561,7 +561,7 @@ function loadStateFromLocalStorage() {
     const monthData  = monthRaw  ? JSON.parse(monthRaw)  : {};
     const merged = { ...DEFAULT_STATE, ...globalData, ...monthData };
     if (!merged.storeSettings) merged.storeSettings = DEFAULT_STATE.storeSettings;
-    if (!merged.constraints)   merged.constraints   = DEFAULT_STATE.constraints;
+    merged.constraints = { ...DEFAULT_STATE.constraints, ...(merged.constraints || {}) }; // 逐欄位補預設值
     if (!merged.assignments)   merged.assignments   = {};
     if (!merged.conflictPairs) merged.conflictPairs = [];
     if (!merged.buddyPairs)    merged.buddyPairs    = [];
@@ -636,15 +636,16 @@ async function loadState() {
     const data = body.data;
     if (data) {
       if (!data.storeSettings) data.storeSettings = DEFAULT_STATE.storeSettings;
-      if (!data.constraints)   data.constraints   = DEFAULT_STATE.constraints;
+      data.constraints = { ...DEFAULT_STATE.constraints, ...(data.constraints || {}) }; // 逐欄位補預設值
       if (!data.assignments)   data.assignments   = {};
       if (!data.conflictPairs) data.conflictPairs = [];
       if (!data.buddyPairs)    data.buddyPairs    = [];
       state = { ...DEFAULT_STATE, ...data };
       syncStores();
-      _dirty = false; // 剛從雲端載入，狀態是乾淨的
+      _savedSeq = _editSeq; _dirty = false; // 剛從雲端載入，狀態是乾淨的
       _monthMeta = { updatedAt: body.monthUpdatedAt || null, updatedBy: body.monthUpdatedBy || null };
     }
+    if (body.user) currentUser = { email: body.user.email || '', name: body.user.name || body.user.email || '' };
   } catch(e) {
     if (e.kind === 'auth') {
       showAuthExpiredModal();
@@ -664,43 +665,66 @@ async function loadState() {
   }
 }
 
-async function saveState(opts = {}) {
+// ── 儲存序號：每次修改 +1，成功儲存時記下「送出當下」的序號 ──
+// 舊版在「儲存傳送中又修改」時，新修改會被丟棄且誤標為已儲存；
+// 改用序號比對後，只有送出內容涵蓋到最新修改才算乾淨，否則自動再存一次。
+let _editSeq = 0;
+let _savedSeq = 0;
+let _lastSaveFailed = false;
+// 合併連續操作的等待時間。1.5 秒可把連點多格合併成一次寫入，
+// 也避開 KV「同一個 key 每秒最多寫入 1 次」的限制。
+const SAVE_DEBOUNCE_MS = 1500;
+
+function markDirty(opts = {}) {
   if (opts.force) _pendingForce = true;
+  _editSeq++;
   _dirty = true;
-  if (_useLocalFallback) {
-    saveStateToLocalStorage();
-    _dirty = false;
-    setSaveIndicator('local');
-    return;
-  }
-  // Debounce: coalesce rapid saves into one request 500ms later
-  if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(async () => {
-    _saveTimer = null;
-    await _doSaveToAPI();
-  }, 500);
 }
 
-// Immediately upload state to API (no debounce). Returns a Promise.
-async function saveStateImmediate(opts = {}) {
-  if (opts.force) _pendingForce = true;
-  _dirty = true;
+function scheduleSave() {
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => { _saveTimer = null; _doSaveToAPI(); }, SAVE_DEBOUNCE_MS);
+}
+
+// 有修改時呼叫：標記並延遲合併儲存
+async function saveState(opts = {}) {
+  markDirty(opts);
   if (_useLocalFallback) {
     saveStateToLocalStorage();
-    _dirty = false;
+    _savedSeq = _editSeq; _dirty = false;
     setSaveIndicator('local');
     return;
   }
-  // Cancel any pending debounced save first
-  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
-  await _doSaveToAPI();
+  scheduleSave();
+}
+
+// 有修改且需要立刻寫入時呼叫（重設、匯入）
+async function saveStateImmediate(opts = {}) {
+  markDirty(opts);
+  await flushSave();
+}
+
+// 把尚未寫入的修改立刻送出並等待完成（切月、儲存版本、重試）。沒有待存內容則什麼都不做。
+async function flushSave() {
+  if (_useLocalFallback) {
+    if (_dirty) { saveStateToLocalStorage(); _savedSeq = _editSeq; _dirty = false; setSaveIndicator('local'); }
+    return;
+  }
+  for (let i = 0; i < 3; i++) {
+    if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+    if (_savePromise) { await _savePromise; continue; }
+    if (!_dirty) return;
+    await _doSaveToAPI();
+    if (_lastSaveFailed) return;
+  }
 }
 
 const SAVE_MAX_RETRIES = 3;
 
 async function _doSaveToAPI() {
-  if (_loadingState) return;            // 切月載入中不儲存（防止把空班表寫進新月份）
-  if (_savePromise) return _savePromise; // 已有儲存進行中，共用同一個 promise
+  if (_loadingState) return;              // 切月載入中不儲存（防止把空班表寫進新月份）
+  if (_savePromise) return _savePromise;  // 進行中的儲存結束後，finally 會檢查是否還有新修改
+  if (!_dirty) return;
   _saving = true;
   setSaveIndicator('saving');
   setRefreshBtnDisabled(true);
@@ -709,6 +733,7 @@ async function _doSaveToAPI() {
       let lastErr = null;
       for (let attempt = 1; attempt <= SAVE_MAX_RETRIES; attempt++) {
         try {
+          const seq = _editSeq; // 這次送出的內容涵蓋到哪一次修改
           const forceParam = _pendingForce ? '&force=1' : '';
           const body = await apiFetch(`/api/state?month=${monthKey()}${forceParam}`, {
             method: 'PUT',
@@ -716,16 +741,19 @@ async function _doSaveToAPI() {
             body: JSON.stringify(state),
           });
           // 到這裡代表後端確認寫入成功（body.ok === true）
-          _dirty = false;
+          _savedSeq = seq;
+          _dirty = _editSeq !== _savedSeq;
           _pendingForce = false;
+          _lastSaveFailed = false;
           _lastSaveTime = Date.now();
-          _monthMeta = { updatedAt: body.savedAt, updatedBy: body.savedBy };
-          setSaveIndicator('saved');
-          showToast('✅ 已儲存至雲端', 'success', 1600);
+          if (body.monthWritten) _monthMeta = { updatedAt: body.savedAt, updatedBy: body.savedBy };
+          setSaveIndicator(_dirty ? 'saving' : 'saved');
+          if (!_dirty) showToast('✅ 已儲存至雲端', 'success', 1600);
           return;
         } catch(e) {
           lastErr = e;
           if (e.kind === 'auth') {
+            _lastSaveFailed = true;
             setSaveIndicator('error');
             showAuthExpiredModal();
             return;
@@ -737,15 +765,17 @@ async function _doSaveToAPI() {
               _pendingForce = true;
               continue; // 帶 force=1 重試
             }
+            _lastSaveFailed = true;
             return;
           }
-          // network / server 錯誤 → 指數退避重試
+          // network / server 錯誤（含 KV 429）→ 退避後重試
           if (attempt < SAVE_MAX_RETRIES) {
-            await new Promise(r => setTimeout(r, attempt * 1200));
+            await new Promise(r => setTimeout(r, attempt * 1500));
           }
         }
       }
       // 重試全部失敗
+      _lastSaveFailed = true;
       console.error('saveState failed after retries:', lastErr);
       setSaveIndicator('error');
       showToast(`❌ 儲存失敗（已重試 ${SAVE_MAX_RETRIES} 次）：${lastErr.message} — 資料尚未上傳，請勿關閉頁面`, 'error', 0, { retry: true });
@@ -753,11 +783,38 @@ async function _doSaveToAPI() {
       _saving = false;
       _savePromise = null;
       setRefreshBtnDisabled(false);
+      // 傳送期間又有新修改 → 再排一次儲存（失敗時交給使用者按「重試」，避免無限重試）
+      if (_dirty && !_lastSaveFailed && !_saveTimer) scheduleSave();
     }
   })();
   _savePromise = p;
   await p;
 }
+
+// 切到背景／關閉分頁時，把尚未送出的修改用 keepalive 送出（頁面關掉後請求仍會完成）
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'hidden') return;
+  if (_useLocalFallback || _loadingState || !_dirty || _savePromise) return;
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+  const seq = _editSeq;
+  const forceParam = _pendingForce ? '&force=1' : '';
+  try {
+    fetch(`/api/state?month=${monthKey()}${forceParam}`, {
+      method: 'PUT', keepalive: true, cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(state),
+    }).then(r => r.ok && (r.headers.get('content-type') || '').includes('application/json') ? r.json() : null)
+      .then(b => {
+        if (!b || !b.ok) { if (_dirty && !_saveTimer) scheduleSave(); return; }
+        _savedSeq = Math.max(_savedSeq, seq);
+        _dirty = _editSeq !== _savedSeq;
+        _pendingForce = false;
+        _lastSaveTime = Date.now();
+        setSaveIndicator(_dirty ? 'saving' : 'saved');
+      })
+      .catch(() => { if (_dirty && !_saveTimer) scheduleSave(); });
+  } catch(e) {}
+});
 
 // ── Toast 提示系統 ──────────────────────────────────────────
 // duration 0 = 常駐直到手動關閉；opts.retry = 顯示「重試儲存」按鈕
@@ -788,7 +845,7 @@ function showToast(msg, type = 'info', duration = 2500, opts = {}) {
     const btn = document.createElement('button');
     btn.textContent = '🔄 重試儲存';
     btn.style.cssText = 'background:rgba(255,255,255,0.12);border:none;color:inherit;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;white-space:nowrap;';
-    btn.onclick = () => { el.remove(); saveStateImmediate(); };
+    btn.onclick = () => { el.remove(); _lastSaveFailed = false; flushSave(); };
     el.appendChild(btn);
   }
   if (duration === 0 || opts.retry) {
@@ -827,19 +884,6 @@ function setSaveIndicator(status) {
   }
 }
 
-async function loadWhoami() {
-  if (_useLocalFallback) {
-    currentUser = { email: '', name: '' };
-    return;
-  }
-  try {
-    const res = await fetch('/api/whoami');
-    const data = await res.json();
-    currentUser = { email: data.email || '', name: data.name || data.email || '' };
-  } catch(e) {
-    currentUser = { email: '', name: '' };
-  }
-}
 
 // ============================================================
 // UTILITIES
@@ -1047,147 +1091,233 @@ function getViolations() {
 // AUTO SCHEDULER (greedy)
 // ============================================================
 
+// 流程：建立索引 → 以不同排序重複執行貪婪排班 → 用成本函式挑出最佳的一份。
+// 全部在瀏覽器內計算，不會產生任何 Cloudflare 用量。
+const AUTO_SCHEDULE_TIME_BUDGET_MS = 300; // 試算時間上限
+const AUTO_SCHEDULE_MAX_RUNS = 300;       // 試算次數上限（第 1 次為不加亂數的基準解）
+// 挑選最佳班表時各項問題的扣分（越大越要避免）
+const SCHEDULE_WEIGHTS = {
+  unfilled: 1000,   // 每 1 個人力缺口（門市少人）
+  newbieAlone: 120, // 每 1 個「有新進、沒有正式員工」的班別
+  underMin: 80,     // 每 1 天未達最少班數
+  buddySlot: 6,     // 搭班夥伴排在同一班（加分）
+  buddyDay: 3,      // 搭班夥伴同一天上班（加分）
+};
+
+// 可重現的亂數（同一個月份每次自動排班結果一致）
+function mulberry32(seed) {
+  return function() {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// 把員工、互斥、搭班、班別整理成以索引查詢的結構，排班過程不再掃描整張班表
+function buildScheduleContext() {
+  const N = getDaysInMonth(state.year, state.month);
+  const emps = state.employees.map((e, idx) => {
+    const sm = e.storeMode || 'none';
+    const sl = e.storeList || e.preferredStores || [];
+    const avail = new Uint8Array(N + 2);
+    for (const d of (e.availability || [])) if (d >= 1 && d <= N) avail[d] = 1;
+    let availCount = 0;
+    for (let d = 1; d <= N; d++) availCount += avail[d];
+    const maxS = e.maxShifts ?? state.constraints.defaultMaxShifts;
+    const minS = e.minShifts ?? state.constraints.defaultMinShifts;
+    return {
+      id: e.id, idx, avail, availCount, maxS, minS,
+      cap: Math.min(maxS, availCount),                // 本月實際能排的上限
+      allowed: (sm === 'assigned' && sl.length > 0) ? new Set(sl) : null,
+      pref: e.preferredStore || '',
+      role: empRole(e),
+    };
+  });
+  const indexOf = new Map(emps.map(e => [e.id, e.idx]));
+  const toSets = (pairs) => {
+    const sets = emps.map(() => new Set());
+    for (const [a, b] of (pairs || [])) {
+      const ia = indexOf.get(a), ib = indexOf.get(b);
+      if (ia === undefined || ib === undefined) continue;
+      sets[ia].add(ib); sets[ib].add(ia);
+    }
+    return sets;
+  };
+  const slots = [];
+  for (let d = 1; d <= N; d++) {
+    const weekend = isWeekend(getDow(state.year, state.month, d));
+    for (const store of STORES) {
+      const eligible = emps.filter(e => e.avail[d] && (!e.allowed || e.allowed.has(store.id))).length;
+      for (const sl of getSlotKeys(store.id, d)) {
+        // 稀缺度：需求人數 ÷ 當天可排人數，越高越難排
+        slots.push({ key: sl.key, day: d, storeId: store.id, type: sl.type, staff: sl.staff,
+          weekend, scarcity: sl.staff / Math.max(1, eligible) });
+      }
+    }
+  }
+  return {
+    N, maxC: state.constraints.maxConsecutive, emps, slots,
+    conflicts: toSets(state.conflictPairs), buddies: toSets(state.buddyPairs),
+  };
+}
+
+// 單次貪婪排班。rng 為 null 時不加亂數（基準解）。
+function greedySchedule(ctx, rng) {
+  const { N, maxC, emps, slots, conflicts, buddies } = ctx;
+  const worked  = new Int32Array(emps.length);            // 已排天數
+  const workDay = emps.map(() => new Uint8Array(N + 2));  // 某天是否有班
+  const dayStore = emps.map(() => new Array(N + 2));      // 某天排在哪家店
+  const dayTypes = emps.map(() => new Array(N + 2));      // 某天已排的班別
+  const picksBySlot = new Array(slots.length);
+
+  // 最難排的班先排；週末略微優先；試算時加入亂數打散順序
+  const order = slots.map((s, i) => ({ i, k: s.scarcity + (s.weekend ? 0.05 : 0) + (rng ? rng() * 0.15 : 0) }))
+    .sort((a, b) => b.k - a.k);
+
+  const runLength = (wd, d) => {
+    let len = 1;
+    for (let x = d - 1; x >= 1 && wd[x]; x--) len++;
+    for (let x = d + 1; x <= N && wd[x]; x++) len++;
+    return len;
+  };
+
+  const eligible = (e, s) => {
+    const d = s.day;
+    if (!e.avail[d]) return false;
+    if (e.allowed && !e.allowed.has(s.storeId)) return false;
+    if (workDay[e.idx][d]) {
+      // 同一天只允許：同一家店的早班 + 晚班
+      const types = dayTypes[e.idx][d];
+      if (dayStore[e.idx][d] !== s.storeId) return false;
+      if (s.type === 'FULL' || types.includes('FULL') || types.includes(s.type)) return false;
+      return true;
+    }
+    if (worked[e.idx] >= e.maxS) return false;
+    workDay[e.idx][d] = 1;                    // 暫時標記以計算連續天數
+    const len = runLength(workDay[e.idx], d);
+    workDay[e.idx][d] = 0;
+    return len <= maxC;
+  };
+
+  for (const { i: si } of order) {
+    const s = slots[si];
+    const picks = [];
+    const pool = emps.filter(e => eligible(e, s));
+    while (picks.length < s.staff && pool.length > 0) {
+      let hasRegular = false, hasNew = false;
+      for (const p of picks) { const r = emps[p].role; if (r === 'regular') hasRegular = true; else if (r === 'new') hasNew = true; }
+      const seatsAfter = s.staff - picks.length - 1; // 挑完這位後還剩幾個空位
+
+      let best = -1, bestScore = -Infinity;
+      for (let pi = 0; pi < pool.length; pi++) {
+        const e = pool[pi];
+        if (picks.some(p => conflicts[e.idx].has(p))) continue; // 不能與已挑選者互斥
+        let score = -2 * worked[e.idx];                          // 平衡：班數越少越優先
+        // 最少班數：還差越多、剩餘可排天越少 → 越急
+        const need = Math.min(e.minS, e.availCount) - worked[e.idx];
+        if (need > 0) score += 25 * Math.min(1.5, need / Math.max(1, e.availCount - worked[e.idx]));
+        if (e.pref === s.storeId) score += 6;                    // 偏好門市
+        // 搭班偏好：夥伴已在此班 > 夥伴當天已有班
+        let buddyHere = false, buddyToday = false;
+        for (const b of buddies[e.idx]) {
+          if (picks.includes(b)) { buddyHere = true; break; }
+          if (workDay[b][s.day]) buddyToday = true;
+        }
+        if (buddyHere) score += 40; else if (buddyToday) score += 15;
+        // 帶新人規則（正式員工 ↔ 新進員工）
+        if (e.role === 'regular' && hasNew) score += hasRegular ? 12 : 45;
+        // 新進坐上最後一個空位且沒有正職 → 會單獨上班；扣分需大於「最少班數」加分，有正職可排時就讓正職來
+        if (e.role === 'new' && !hasRegular) score -= seatsAfter <= 0 ? 60 : 10;
+        if (rng) score += rng() * 2;
+        if (score > bestScore) { bestScore = score; best = pi; }
+      }
+      if (best < 0) break;
+      const e = pool[best];
+      pool.splice(best, 1);
+      picks.push(e.idx);
+      if (!workDay[e.idx][s.day]) {
+        workDay[e.idx][s.day] = 1;
+        worked[e.idx]++;
+        dayStore[e.idx][s.day] = s.storeId;
+        dayTypes[e.idx][s.day] = [];
+      }
+      dayTypes[e.idx][s.day].push(s.type);
+    }
+    picksBySlot[si] = picks;
+  }
+  return { picksBySlot, worked, workDay };
+}
+
+// 成本越低越好：人力缺口 >> 新進無正職 > 未達最少班數 > 搭班 > 公平性
+function scheduleCost(ctx, res) {
+  const { N, emps, slots, buddies } = ctx;
+  const W = SCHEDULE_WEIGHTS;
+  let unfilled = 0, newbieAlone = 0, buddySlot = 0, buddyDay = 0, filled = 0;
+  slots.forEach((s, si) => {
+    const p = res.picksBySlot[si];
+    filled += p.length;
+    unfilled += Math.max(0, s.staff - p.length);
+    let reg = false, nw = false;
+    for (const x of p) {
+      if (emps[x].role === 'regular') reg = true; else if (emps[x].role === 'new') nw = true;
+      for (const b of buddies[x]) if (b > x && p.includes(b)) buddySlot++;
+    }
+    if (nw && !reg) newbieAlone++;
+  });
+  for (const e of emps) for (const b of buddies[e.idx]) {
+    if (b <= e.idx) continue;
+    for (let d = 1; d <= N; d++) if (res.workDay[e.idx][d] && res.workDay[b][d]) buddyDay++;
+  }
+  let underMin = 0, fairness = 0;
+  const capSum = emps.reduce((a, e) => a + e.cap, 0) || 1;
+  for (const e of emps) {
+    const w = res.worked[e.idx];
+    underMin += Math.max(0, Math.min(e.minS, e.availCount) - w);
+    // 依各人可排上限按比例分配的目標天數
+    const target = Math.min(e.cap, Math.max(Math.min(e.minS, e.availCount), filled * e.cap / capSum));
+    fairness += (w - target) ** 2;
+  }
+  return {
+    total: unfilled * W.unfilled + newbieAlone * W.newbieAlone + underMin * W.underMin
+      - buddySlot * W.buddySlot - buddyDay * W.buddyDay + fairness,
+    unfilled, underMin, newbieAlone, buddySlot, buddyDay,
+  };
+}
+
+// 產生班表（純計算，不修改 state）
+function generateSchedule() {
+  const ctx = buildScheduleContext();
+  const rng = mulberry32(state.year * 100 + state.month);
+  const t0 = performance.now();
+  let best = null, runs = 0;
+  while (runs < AUTO_SCHEDULE_MAX_RUNS) {
+    const res = greedySchedule(ctx, runs === 0 ? null : rng);
+    const cost = scheduleCost(ctx, res);
+    runs++;
+    if (!best || cost.total < best.cost.total) best = { res, cost };
+    if (performance.now() - t0 > AUTO_SCHEDULE_TIME_BUDGET_MS) break;
+  }
+  const assignments = {};
+  ctx.slots.forEach((s, si) => {
+    const p = best.res.picksBySlot[si];
+    if (p.length) assignments[s.key] = p.map(x => ctx.emps[x].id);
+  });
+  return { assignments, cost: best.cost, runs };
+}
+
 function autoSchedule() {
   if (!confirm('確定要重新自動排班嗎？目前班表可能會被重新更動。')) return;
-  // Clear existing
-  state.assignments = {};
-  const totalDays = getDaysInMonth(state.year, state.month);
-  const empShiftDays = {}; // empId -> Set of dates
-  const empSlotCount = {}; // empId -> count of slot assignments
-  state.employees.forEach(e => { empShiftDays[e.id] = new Set(); empSlotCount[e.id] = 0; });
-  const maxC = state.constraints.maxConsecutive;
-
-  // Build all slots
-  const allSlots = [];
-  for (let d = 1; d <= totalDays; d++) {
-    for (const store of STORES) {
-      const slots = getSlotKeys(store.id, d);
-      for (const slot of slots) {
-        allSlots.push({ ...slot, day:d, storeId:store.id });
-      }
-    }
-  }
-
-  // Sort: weekend first (harder to fill), then by staff needed desc
-  allSlots.sort((a,b) => {
-    const aw = isWeekend(getDow(state.year, state.month, a.day)) ? 0 : 1;
-    const bw = isWeekend(getDow(state.year, state.month, b.day)) ? 0 : 1;
-    if (aw !== bw) return aw - bw;
-    return b.staff - a.staff;
-  });
-
-  function wouldExceedConsecutive(empId, day) {
-    const dk = dateKey(day);
-    const d = new Date(dk);
-    // check forward and backward
-    let before = 0;
-    for (let i = 1; i <= maxC; i++) {
-      const prev = new Date(d); prev.setDate(prev.getDate() - i);
-      const pk = prev.toISOString().split('T')[0];
-      if (empShiftDays[empId].has(pk)) before++; else break;
-    }
-    let after = 0;
-    for (let i = 1; i <= maxC; i++) {
-      const next = new Date(d); next.setDate(next.getDate() + i);
-      const nk = next.toISOString().split('T')[0];
-      if (empShiftDays[empId].has(nk)) after++; else break;
-    }
-    return (before + 1 + after) > maxC;
-  }
-
-  for (const slot of allSlots) {
-    const needed = slot.staff;
-    const dk = dateKey(slot.day);
-
-    // Get candidates: available, not already assigned this day to another slot that conflicts,
-    // not exceeding max shifts, not exceeding consecutive
-    let candidates = state.employees.filter(e => {
-      if (!isEmployeeAvailable(e, slot.day)) return false;
-      // Store mode: 'assigned' means only allowed stores
-      const sm = e.storeMode || 'none';
-      const sl = e.storeList || e.preferredStores || [];
-      if (sm === 'assigned' && sl.length > 0 && !sl.includes(slot.storeId)) return false;
-      const maxS = e.maxShifts ?? state.constraints.defaultMaxShifts;
-      if (empShiftDays[e.id].size >= maxS && !empShiftDays[e.id].has(dk)) return false;
-      // already on this day? Check if same store + conflicting shift
-      // A person can only work one store per day (full day) or two shifts at same store
-      // Actually: one assignment per day maximum (simplification)
-      if (empShiftDays[e.id].has(dk)) {
-        // Already working this day — skip unless it's AM/PM split at same store
-        // For simplicity: allow AM+PM same store, disallow different store same day
-        const existingSlots = Object.entries(state.assignments).filter(([k,arr]) =>
-          k.startsWith(dk) && arr.includes(e.id)
-        );
-        for (const [ek] of existingSlots) {
-          const parts = ek.split('_');
-          const existStore = parts[1];
-          const existType = parts[2];
-          if (existStore !== slot.storeId) return false; // diff store same day
-          if (existType === 'FULL' || slot.type === 'FULL') return false; // full + anything = conflict
-          if (existType === slot.type) return false; // same shift type
-        }
-      }
-      if (!empShiftDays[e.id].has(dk) && wouldExceedConsecutive(e.id, slot.day)) return false;
-      return true;
-    });
-
-    // Filter out candidates that would conflict with already-assigned people on this slot
-    candidates = candidates.filter(e => {
-      const currentAssigned = state.assignments[slot.key] || [];
-      return !currentAssigned.some(otherId => isConflictPair(e.id, otherId));
-    });
-
-    // 逐位挑選：每挑一位就依「平衡 + 偏好門市 + 搭班偏好 + 帶新人」重新評分。
-    // 這樣「此班已有新進員工」時，下一個座位會優先補進正式員工。
-    const picks = [];
-    let pool = candidates.slice();
-    while (picks.length < needed && pool.length > 0) {
-      const pickedRoles = picks.map(id => roleOfId(id));
-      const hasRegular = pickedRoles.includes('regular');
-      const hasNew = pickedRoles.includes('new');
-      const seatsAfter = needed - picks.length - 1; // 挑完這位後還剩幾個空位
-
-      let best = null, bestScore = -Infinity;
-      for (const c of pool) {
-        // 不能與已挑選者互斥
-        if (picks.some(pid => isConflictPair(c.id, pid))) continue;
-        let score = 0;
-        // 平衡：目前班數越少越優先
-        score -= empShiftDays[c.id].size * 2;
-        // 偏好門市
-        if (c.preferredStore === slot.storeId) score += 6;
-        // 搭班偏好：夥伴已在此班 > 夥伴當天已有班
-        const buddies = buddyIdsOf(c.id);
-        if (buddies.some(bid => picks.includes(bid))) score += 40;
-        else if (buddies.some(bid => empShiftDays[bid] && empShiftDays[bid].has(dk))) score += 15;
-        // 帶新人規則（正式員工 ↔ 新進員工）
-        const r = roleOfId(c.id);
-        if (r === 'regular' && hasNew && !hasRegular) score += 45; // 此班有新進但無正職 → 優先補正職帶領
-        else if (r === 'regular' && hasNew) score += 12;
-        if (r === 'new' && !hasRegular) {
-          if (seatsAfter <= 0) score -= 30; // 挑完就沒機會再補正職 → 避免新進落單／整班全新進
-          else score -= 10;                 // 先讓正職進來
-        }
-        if (score > bestScore) { bestScore = score; best = c; }
-      }
-      if (!best) break;
-      picks.push(best.id);
-      empShiftDays[best.id].add(dk);
-      empSlotCount[best.id]++;
-      pool = pool.filter(x => x.id !== best.id);
-    }
-    if (picks.length > 0) {
-      state.assignments[slot.key] = picks;
-    }
-  }
-
+  const { assignments, cost, runs } = generateSchedule();
+  state.assignments = assignments;
   saveState();
   render();
-  const newbieWarnings = getViolations().filter(v => v.type === 'newbieNoMentor');
-  if (newbieWarnings.length > 0) {
-    showToast(`⚠️ 有 ${newbieWarnings.length} 個班別的新進員工沒有正式員工一起上班，請於違規提醒中確認`, 'error', 6000);
+  if (cost.newbieAlone > 0) {
+    showToast(`⚠️ 有 ${cost.newbieAlone} 個班別的新進員工沒有正式員工一起上班，請於違規提醒中確認`, 'error', 6000);
+  } else if (cost.unfilled > 0) {
+    showToast(`⚠️ 自動排班完成（試算 ${runs} 種組合），仍有 ${cost.unfilled} 個人力缺口，請見違規提醒`, 'error', 6000);
   } else {
-    showToast('✅ 自動排班完成', 'success', 1800);
+    showToast(`✅ 自動排班完成（試算 ${runs} 種組合，已選出最佳結果）`, 'success', 2500);
   }
 }
 
@@ -1205,7 +1335,7 @@ function render() {
         <img src="data:image/png;base64,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" alt="Logo" style="height:38px;border-radius:6px;" />
         <div style="display:flex;flex-direction:column;">
           <span style="font-size:20px;font-weight:700;letter-spacing:-0.5px;">THE food co. <span style="color:var(--accent);">員工排班系統</span></span>
-          <span style="font-size:10px;color:var(--text3);font-weight:400;margin-top:-2px;">同興實業 ─ 門市班表管理工具 v2.9</span>
+          <span style="font-size:10px;color:var(--text3);font-weight:400;margin-top:-2px;">同興實業 ─ 門市班表管理工具 v2.10</span>
         </div>
       </h1>
       <div class="header-actions">
@@ -1253,7 +1383,8 @@ function render() {
   }
 }
 
-function switchTab(t) { state.tab = t; modal = null; saveState(); render(); }
+// 分頁只是畫面狀態，後端也不會儲存 tab，切換時不需送出儲存
+function switchTab(t) { state.tab = t; modal = null; render(); }
 function closeModal() { modal = null; render(); }
 
 // ============================================================
@@ -1550,10 +1681,10 @@ async function gotoMonth(year, month) {
   // 先把未儲存的變更送出，確認寫入雲端後才切換
   if (_saveTimer || _saving || _dirty) {
     setSaveIndicator('saving');
-    try { await saveStateImmediate(); } catch(e) {}
+    try { await flushSave(); } catch(e) {}
     if (_dirty) {
       if (!confirm('⚠️ 目前的變更尚未成功儲存至雲端，切換月份將遺失這些變更。\n\n仍要切換嗎？')) return;
-      _dirty = false; // 使用者選擇放棄變更
+      _savedSeq = _editSeq; _dirty = false; // 使用者選擇放棄變更
     }
   }
   _loadingState = true;
@@ -1612,10 +1743,11 @@ async function showMonthHistoryModal() {
 }
 
 async function refreshData() {
-  // If a save is still in flight, wait for it first to avoid overwriting fresh data
-  if (_savePromise) {
+  // 先把尚未送出的修改存上去，否則載入雲端資料會把它們蓋掉
+  if (_saveTimer || _savePromise || _dirty) {
     setSaveIndicator('saving');
-    try { await _savePromise; } catch(e) {}
+    try { await flushSave(); } catch(e) {}
+    if (_dirty && !confirm('⚠️ 目前的變更尚未成功儲存至雲端，同步會以雲端資料覆蓋這些變更。\n\n仍要同步嗎？')) return;
   }
   if (_useLocalFallback) {
     loadStateFromLocalStorage();
@@ -1645,11 +1777,16 @@ async function saveVersion() {
   if (_useLocalFallback) { alert('本機開發模式不支援版本快照。'); return; }
   // 先確保目前變更已寫入雲端，版本快照才會包含最新內容
   if (_saveTimer || _saving || _dirty) {
-    try { await saveStateImmediate(); } catch(e) {}
+    try { await flushSave(); } catch(e) {}
     if (_dirty) { showToast('❌ 目前變更尚未成功儲存至雲端，請稍後再按一次', 'error', 4000); return; }
   }
   try {
-    await apiFetch(`/api/versions?month=${monthKey()}&action=save`, { method: 'POST' });
+    // 直接送出目前班表作為快照（後端不必再讀 KV）
+    await apiFetch(`/api/versions?month=${monthKey()}&action=save`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignments: state.assignments }),
+    });
     showToast('班表已儲存成功。', 'success', 2200);
   } catch(e) {
     if (e.kind === 'auth') { showAuthExpiredModal(); return; }
@@ -1660,17 +1797,21 @@ async function saveVersion() {
 async function undoVersion() {
   if (_useLocalFallback) { alert('本機開發模式不支援版本還原。'); return; }
   if (!confirm('確定要返回上一個版本嗎？目前尚未儲存的更動可能會消失。')) return;
-  // 取消待送的儲存，避免還原後又把舊資料寫回雲端
+  // 暫停延遲儲存，並等傳送中的儲存結束，避免它在還原之後才寫入、蓋掉還原結果
   if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
-  _dirty = false;
+  if (_savePromise) { try { await _savePromise; } catch(e) {} }
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
   try {
-    await apiFetch(`/api/versions?month=${monthKey()}&action=undo`, { method: 'POST' });
-    // 還原成功 → 重新載入雲端資料（含被還原的 assignments）
-    _loadingState = true;
-    try { await loadState(); } finally { _loadingState = false; }
+    const body = await apiFetch(`/api/versions?month=${monthKey()}&action=undo`, { method: 'POST' });
+    // 還原成功才捨棄未儲存的修改；直接套用回傳的班表，不必重新載入
+    state.assignments = body.assignments || {};
+    _savedSeq = _editSeq; _dirty = false;
+    _monthMeta = { updatedAt: body.savedAt, updatedBy: body.savedBy };
     render();
     showToast('↩ 已返回上一版本', 'success', 2200);
   } catch(e) {
+    // 還原失敗 → 未儲存的修改照常存回雲端
+    if (_dirty && !_saveTimer) scheduleSave();
     if (e.kind === 'auth') { showAuthExpiredModal(); return; }
     if (e.status === 400) { showToast(`⚠️ ${e.message}`, 'error', 5000); return; }
     showToast(`❌ 返回版本失敗：${e.message}`, 'error', 5000);
@@ -2499,7 +2640,7 @@ function renderHelpTab() {
       <div class="card-title">五、資料管理</div>
       <div style="font-size:13px;line-height:1.9;color:var(--text2);">
         <p><b style="color:var(--text);">儲存位置：</b>所有資料即時儲存至 Cloudflare KV 雲端資料庫，所有登入使用者共用同一份即時資料，不需手動傳輸。</p>
-        <p><b style="color:var(--text);">即時同步：</b>任何修改（排班、員工設定、門市設定）都會在 0.4 秒內自動上傳。右上角顯示最後同步時間。</p>
+        <p><b style="color:var(--text);">即時同步：</b>任何修改（排班、員工設定、門市設定）停止操作約 1.5 秒後自動上傳（連續操作會合併成一次）；切換到其他分頁或關閉網頁時會立即送出。右上角顯示最後同步時間。</p>
         <p><b style="color:var(--text);">手動同步：</b>點擊右上角「🔄 同步」按鈕可立即從雲端重新載入最新資料（適合多人同時使用時確認他人修改）。</p>
         <p><b style="color:var(--text);">匯出：</b>點擊右上角「匯出」按鈕，會下載一個 .json 檔案作為備份。</p>
         <p><b style="color:var(--text);">匯入：</b>點擊「匯入」選擇備份的 .json 檔案，即可還原所有資料到雲端。</p>
@@ -2518,6 +2659,22 @@ function renderChangelogTab() {
   const tc = document.getElementById('tabContent');
 
   const logs = [
+    {
+      version: 'v2.10',
+      date: '2026-10-28',
+      title: '效能與用量優化：減少雲端寫入、修正儲存遺漏、排班演算法升級',
+      items: [
+        '🐛 修正：儲存傳送中（網路較慢時）若又修改班表，該次修改可能遺失且被誤標為「已儲存」，現在會自動補存',
+        '🐛 修正：剛修改完立刻按「🔄 同步」會被雲端舊資料蓋掉，現在會先存再同步',
+        '🐛 修正：「返回上一版本」失敗時（例如沒有上一版本），未儲存的修改不再被丟棄',
+        '📉 減少雲端寫入：自動備份改為每 30 分鐘最多一次（原本每次儲存都備份，寫入量加倍）',
+        '📉 連續操作合併儲存：等待時間 0.5 秒 → 1.5 秒，連點多格只寫入一次；切到背景或關閉分頁時會立即送出',
+        '📉 切換分頁不再觸發儲存；載入頁面少呼叫一支 API；「歷史班表」不再逐月讀取全部資料',
+        '📉 內容相同時不重複建立版本；瀏覽沒有資料的月份不會在雲端建立空白紀錄',
+        '⚡ 自動排班升級：先排最難排的班、納入「最少班數」、試算數百種組合取最佳結果（同月份重跑結果一致）',
+        '⚡ 以真實資料實測：11 月人力缺口 15 → 6、未達最少班數 9 → 3 天；所有硬性規則（休假、連續天數、班數上限、互斥）維持零違規',
+      ],
+    },
     {
       version: 'v2.9',
       date: '2026-07-21',
@@ -2742,7 +2899,7 @@ function exportJSON() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `排班_${state.year}_${String(state.month).padStart(2,'0')}_v2.9.json`;
+  a.download = `排班_${state.year}_${String(state.month).padStart(2,'0')}_v2.10.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -2759,6 +2916,8 @@ function importJSON() {
       const data = JSON.parse(text);
       if (data.employees && data.storeSettings) {
         state = { ...DEFAULT_STATE, ...data };
+        state.constraints = { ...DEFAULT_STATE.constraints, ...(data.constraints || {}) };
+        if (!state.buddyPairs) state.buddyPairs = [];
         syncStores();
         await saveStateImmediate({ force: true }); // 匯入屬刻意覆寫
         render();
@@ -3032,8 +3191,7 @@ async function exportStoreImage(storeId) {
 async function init() {
   applyTheme();
   render(); // render shell immediately
-  await loadState();        // detect API availability first
-  await loadWhoami();       // then load user (knows if fallback mode)
+  await loadState();        // 同一個請求也帶回登入者資訊（不再另外呼叫 /api/whoami）
   render(); // re-render with real data
 }
 

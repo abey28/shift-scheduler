@@ -1,32 +1,29 @@
 /**
- * GET  /api/state?month=2026-04  → { data: { ...global, assignments, year, month } }
+ * GET  /api/state?month=2026-04  → { ok, data: { ...global, assignments, year, month }, user, monthUpdatedAt, monthUpdatedBy }
  * PUT  /api/state?month=2026-04  ← body: full state object
  *
  * KV keys:
- *   "global"                  → stores, employees, storeSettings, constraints, conflictPairs
+ *   "global"                  → stores, employees, storeSettings, constraints, conflictPairs, buddyPairs
  *   "schedule:2026-04"        → { assignments, updatedAt, updatedBy }
- *   "backup:global"           → previous generation of "global" (rolling, 1 世代)
- *   "backup:schedule:2026-04" → previous generation of that month (rolling, 1 世代)
+ *                               metadata: { count, updatedAt, updatedBy, backupAt }（供 /api/months 免讀值）
+ *   "backup:global"           → 「global」的舊世代備份
+ *   "backup:schedule:2026-04" → 該月的舊世代備份
  *
- * 防護機制：
- *   - PUT 會先讀取現有資料，內容相同時跳過寫入（避免 KV rate limit）
- *   - 覆寫前先把舊值寫進 backup: key（誤刪可救回一個世代）
- *   - 若請求會「用空資料覆蓋非空資料」→ 拒絕並回 409（除非 ?force=1）
+ * 用量控制（KV 免費額度：寫入 1,000 次/天，是最吃緊的一項）：
+ *   - 內容沒變就不寫
+ *   - 備份最多每 30 分鐘寫一次（時間記在 KV metadata，讀主資料時一併取得，不多花一次讀取）
+ *   - 從未存過的月份，若班表是空的就不建立 key
+ *
+ * 防護：用空資料覆蓋非空資料 → 409（刻意清空帶 ?force=1）
  */
+import { getUserEmail, countFilled } from '../../lib/auth.js';
 
-function getUserEmail(request) {
-  const jwt = request.headers.get('Cf-Access-Jwt-Assertion');
-  if (!jwt) return 'dev@local';
-  try {
-    let b64 = jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    while (b64.length % 4 !== 0) b64 += '=';
-    return JSON.parse(atob(b64)).email || 'unknown';
-  } catch { return 'unknown'; }
-}
+const BACKUP_INTERVAL_MS = 30 * 60 * 1000;
 
 export async function onRequestGet({ request, env }) {
   const url = new URL(request.url);
   const month = url.searchParams.get('month') || '';
+  const email = getUserEmail(request);
 
   try {
     const [globalRaw, monthRaw] = await Promise.all([
@@ -37,23 +34,17 @@ export async function onRequestGet({ request, env }) {
     const globalData = globalRaw ? JSON.parse(globalRaw) : {};
     const monthData  = monthRaw  ? JSON.parse(monthRaw)  : {};
 
-    // Parse year/month from query param so frontend state is always consistent
     let year  = new Date().getFullYear();
     let monthNum = new Date().getMonth() + 1;
     if (month && /^\d{4}-\d{2}$/.test(month)) {
       [year, monthNum] = month.split('-').map(Number);
     }
 
-    const data = {
-      ...globalData,
-      assignments: monthData.assignments || {},
-      year,
-      month: monthNum,
-    };
-
     return Response.json({
       ok: true,
-      data,
+      data: { ...globalData, assignments: monthData.assignments || {}, year, month: monthNum },
+      // 登入者資訊一起回傳，前端不必再呼叫 /api/whoami
+      user: { email, name: email.split('@')[0] },
       monthUpdatedAt: monthData.updatedAt || null,
       monthUpdatedBy: monthData.updatedBy || null,
     });
@@ -70,22 +61,22 @@ export async function onRequestPut({ request, env }) {
 
   try {
     const body = await request.json();
-
-    // Split state: global (shared across months) vs per-month assignments
     const { assignments, year, month: _m, tab, ...globalPart } = body;
     const newGlobalStr = JSON.stringify(globalPart);
     const newAssignments = assignments || {};
+    const newAssignStr = JSON.stringify(newAssignments);
 
-    // Read current values for diff / backup / safety checks
-    const [curGlobalRaw, curMonthRaw] = await Promise.all([
-      env.SCHEDULER_KV.get('global'),
-      month ? env.SCHEDULER_KV.get(`schedule:${month}`) : Promise.resolve(null),
+    // 一次讀取同時拿到值與 metadata（備份時間）
+    const [g, m] = await Promise.all([
+      env.SCHEDULER_KV.getWithMetadata('global'),
+      month ? env.SCHEDULER_KV.getWithMetadata(`schedule:${month}`) : Promise.resolve({ value: null, metadata: null }),
     ]);
+    const curGlobalRaw = g.value;
+    const curMonth = m.value ? JSON.parse(m.value) : null;
 
     // ── 防護：拒絕用空資料覆蓋非空資料 ──
     if (!force && curGlobalRaw) {
-      const cur = JSON.parse(curGlobalRaw);
-      const curEmpCount = (cur.employees || []).length;
+      const curEmpCount = (JSON.parse(curGlobalRaw).employees || []).length;
       const newEmpCount = (globalPart.employees || []).length;
       if (curEmpCount > 0 && newEmpCount === 0) {
         return Response.json({
@@ -95,11 +86,9 @@ export async function onRequestPut({ request, env }) {
         }, { status: 409 });
       }
     }
-    if (!force && month && curMonthRaw) {
-      const curMonth = JSON.parse(curMonthRaw);
+    if (!force && curMonth) {
       const curCount = Object.keys(curMonth.assignments || {}).length;
-      const newCount = Object.keys(newAssignments).length;
-      if (curCount > 0 && newCount === 0) {
+      if (curCount > 0 && Object.keys(newAssignments).length === 0) {
         return Response.json({
           ok: false,
           error: 'empty_overwrite_blocked',
@@ -108,28 +97,44 @@ export async function onRequestPut({ request, env }) {
       }
     }
 
-    const savedAt = new Date().toISOString();
+    const now = Date.now();
+    const savedAt = new Date(now).toISOString();
+    const backupDue = (meta) => !meta || !meta.backupAt || now - meta.backupAt >= BACKUP_INTERVAL_MS;
     const writes = [];
+    let monthWritten = false;
 
-    // ── global：內容有變才寫，寫入前備份舊值 ──
+    // ── global：內容有變才寫；備份節流 ──
     if (curGlobalRaw !== newGlobalStr) {
-      if (curGlobalRaw) writes.push(env.SCHEDULER_KV.put('backup:global', curGlobalRaw));
-      writes.push(env.SCHEDULER_KV.put('global', newGlobalStr));
+      let backupAt = (g.metadata && g.metadata.backupAt) || 0;
+      if (curGlobalRaw && backupDue(g.metadata)) {
+        writes.push(env.SCHEDULER_KV.put('backup:global', curGlobalRaw));
+        backupAt = now;
+      }
+      writes.push(env.SCHEDULER_KV.put('global', newGlobalStr, { metadata: { backupAt } }));
     }
 
-    // ── 月排班：內容有變才寫，寫入前備份舊值 ──
+    // ── 月排班：內容有變才寫；新月份且是空班表 → 不建立 key ──
     if (month) {
-      const newMonthStr = JSON.stringify({ assignments: newAssignments, updatedAt: savedAt, updatedBy: userEmail });
-      const curAssignStr = curMonthRaw ? JSON.stringify(JSON.parse(curMonthRaw).assignments || {}) : null;
-      if (curAssignStr !== JSON.stringify(newAssignments)) {
-        if (curMonthRaw) writes.push(env.SCHEDULER_KV.put(`backup:schedule:${month}`, curMonthRaw));
-        writes.push(env.SCHEDULER_KV.put(`schedule:${month}`, newMonthStr));
+      const curAssignStr = curMonth ? JSON.stringify(curMonth.assignments || {}) : null;
+      const changed = curAssignStr !== newAssignStr;
+      const emptyNewMonth = !curMonth && countFilled(newAssignments) === 0;
+      if (changed && !emptyNewMonth) {
+        let backupAt = (m.metadata && m.metadata.backupAt) || 0;
+        if (m.value && backupDue(m.metadata)) {
+          writes.push(env.SCHEDULER_KV.put(`backup:schedule:${month}`, m.value));
+          backupAt = now;
+        }
+        writes.push(env.SCHEDULER_KV.put(
+          `schedule:${month}`,
+          JSON.stringify({ assignments: newAssignments, updatedAt: savedAt, updatedBy: userEmail }),
+          { metadata: { count: countFilled(newAssignments), updatedAt: savedAt, updatedBy: userEmail, backupAt } },
+        ));
+        monthWritten = true;
       }
     }
 
     await Promise.all(writes);
-
-    return Response.json({ ok: true, savedAt, savedBy: userEmail, writes: writes.length });
+    return Response.json({ ok: true, savedAt, savedBy: userEmail, writes: writes.length, monthWritten });
   } catch (e) {
     return Response.json({ ok: false, error: e.message }, { status: 500 });
   }
