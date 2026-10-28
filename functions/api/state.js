@@ -1,10 +1,12 @@
 /**
- * GET  /api/state?month=2026-04  → { ok, data: { ...global, assignments, year, month }, user, monthUpdatedAt, monthUpdatedBy }
+ * GET  /api/state?month=2026-04  → { ok, data: { ...global, assignments, year, month }, user, monthUpdatedAt, monthUpdatedBy,
+ *                                    availabilitySource, availabilityFrom }
  * PUT  /api/state?month=2026-04  ← body: full state object
  *
  * KV keys:
- *   "global"                  → stores, employees, storeSettings, constraints, conflictPairs, buddyPairs
- *   "schedule:2026-04"        → { assignments, updatedAt, updatedBy }
+ *   "global"                  → stores, employees（不含可上班日）, storeSettings, constraints, conflictPairs, buddyPairs
+ *   "schedule:2026-04"        → { assignments, availability, updatedAt, updatedBy }
+ *                               availability = 當月可上班日 { 員工 id: [日, ...] }（v2.11 起按月份儲存，見 lib/availability.js）
  *                               metadata: { count, updatedAt, updatedBy, backupAt }（供 /api/months 免讀值）
  *   "backup:global"           → 「global」的舊世代備份
  *   "backup:schedule:2026-04" → 該月的舊世代備份
@@ -12,23 +14,25 @@
  * 用量控制（KV 免費額度：寫入 1,000 次/天，是最吃緊的一項）：
  *   - 內容沒變就不寫
  *   - 備份最多每 30 分鐘寫一次（時間記在 KV metadata，讀主資料時一併取得，不多花一次讀取）
- *   - 從未存過的月份，若班表是空的就不建立 key
+ *   - 從未存過的月份，若班表與可上班日都是空的就不建立 key
  *
  * 防護：用空資料覆蓋非空資料 → 409（刻意清空帶 ?force=1）
  */
 import { getUserEmail, countFilled } from '../../lib/auth.js';
+import { splitAvailability, mergeAvailability, resolveAvailability, monthInfo } from '../../lib/availability.js';
 
 const BACKUP_INTERVAL_MS = 30 * 60 * 1000;
 
 export async function onRequestGet({ request, env }) {
   const url = new URL(request.url);
   const month = url.searchParams.get('month') || '';
+  const info = monthInfo(month);
   const email = getUserEmail(request);
 
   try {
     const [globalRaw, monthRaw] = await Promise.all([
       env.SCHEDULER_KV.get('global'),
-      month ? env.SCHEDULER_KV.get(`schedule:${month}`) : Promise.resolve(null),
+      info ? env.SCHEDULER_KV.get(`schedule:${month}`) : Promise.resolve(null),
     ]);
 
     const globalData = globalRaw ? JSON.parse(globalRaw) : {};
@@ -36,8 +40,21 @@ export async function onRequestGet({ request, env }) {
 
     let year  = new Date().getFullYear();
     let monthNum = new Date().getMonth() + 1;
-    if (month && /^\d{4}-\d{2}$/.test(month)) {
-      [year, monthNum] = month.split('-').map(Number);
+    let availabilitySource = null, availabilityFrom = null;
+
+    if (info) {
+      ({ year, month: monthNum } = info);
+      // 新月份才需要讀上個月（帶入上月可上班日）；讀取額度充裕，不影響寫入
+      const prevRaw = monthRaw ? null : await env.SCHEDULER_KV.get(`schedule:${info.prevMonth}`);
+      const { availability, source } = resolveAvailability({
+        globalEmployees: globalData.employees,
+        monthData: monthRaw ? monthData : null,
+        prevMonthData: prevRaw ? JSON.parse(prevRaw) : null,
+        daysInMonth: info.daysInMonth,
+      });
+      if (globalData.employees) globalData.employees = mergeAvailability(globalData.employees, availability);
+      availabilitySource = source;
+      if (source === 'inherited' && prevRaw) availabilityFrom = info.prevMonth;
     }
 
     return Response.json({
@@ -47,6 +64,8 @@ export async function onRequestGet({ request, env }) {
       user: { email, name: email.split('@')[0] },
       monthUpdatedAt: monthData.updatedAt || null,
       monthUpdatedBy: monthData.updatedBy || null,
+      availabilitySource,
+      availabilityFrom,
     });
   } catch (e) {
     return Response.json({ ok: false, error: e.message }, { status: 500 });
@@ -62,6 +81,14 @@ export async function onRequestPut({ request, env }) {
   try {
     const body = await request.json();
     const { assignments, year, month: _m, tab, ...globalPart } = body;
+    // 可上班日從員工身上拆出來，存到月份 key；global 只留跨月共用的員工資料
+    const info = monthInfo(month);
+    let newAvail = null;
+    if (info && Array.isArray(globalPart.employees)) {
+      const split = splitAvailability(globalPart.employees, info.daysInMonth);
+      globalPart.employees = split.employees;
+      newAvail = split.availability;
+    }
     const newGlobalStr = JSON.stringify(globalPart);
     const newAssignments = assignments || {};
     const newAssignStr = JSON.stringify(newAssignments);
@@ -113,11 +140,14 @@ export async function onRequestPut({ request, env }) {
       writes.push(env.SCHEDULER_KV.put('global', newGlobalStr, { metadata: { backupAt } }));
     }
 
-    // ── 月排班：內容有變才寫；新月份且是空班表 → 不建立 key ──
+    // ── 月排班＋可上班日：內容有變才寫；新月份且兩者皆空 → 不建立 key ──
     if (month) {
       const curAssignStr = curMonth ? JSON.stringify(curMonth.assignments || {}) : null;
-      const changed = curAssignStr !== newAssignStr;
-      const emptyNewMonth = !curMonth && countFilled(newAssignments) === 0;
+      const availability = newAvail || (curMonth && curMonth.availability) || {};
+      const availChanged = newAvail !== null &&
+        JSON.stringify((curMonth && curMonth.availability) || null) !== JSON.stringify(newAvail);
+      const changed = curAssignStr !== newAssignStr || availChanged;
+      const emptyNewMonth = !curMonth && countFilled(newAssignments) === 0 && Object.keys(availability).length === 0;
       if (changed && !emptyNewMonth) {
         let backupAt = (m.metadata && m.metadata.backupAt) || 0;
         if (m.value && backupDue(m.metadata)) {
@@ -126,7 +156,7 @@ export async function onRequestPut({ request, env }) {
         }
         writes.push(env.SCHEDULER_KV.put(
           `schedule:${month}`,
-          JSON.stringify({ assignments: newAssignments, updatedAt: savedAt, updatedBy: userEmail }),
+          JSON.stringify({ assignments: newAssignments, availability, updatedAt: savedAt, updatedBy: userEmail }),
           { metadata: { count: countFilled(newAssignments), updatedAt: savedAt, updatedBy: userEmail, backupAt } },
         ));
         monthWritten = true;

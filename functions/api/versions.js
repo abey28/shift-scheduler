@@ -80,9 +80,12 @@ export async function onRequestPost({ request, env }) {
       const prev = versions[0];     // 上一版本
       const assignments = prev.assignments || {};
       const savedAt = new Date().toISOString();
+      // 版本只記班表；當月可上班日保持不變
+      const sRaw = await env.SCHEDULER_KV.get(sKey);
+      const availability = sRaw ? JSON.parse(sRaw).availability : undefined;
       await Promise.all([
         env.SCHEDULER_KV.put(vKey, JSON.stringify(versions)),
-        env.SCHEDULER_KV.put(sKey, JSON.stringify({ assignments, updatedAt: savedAt, updatedBy: userEmail }), {
+        env.SCHEDULER_KV.put(sKey, JSON.stringify({ assignments, availability, updatedAt: savedAt, updatedBy: userEmail }), {
           metadata: { count: countFilled(assignments), updatedAt: savedAt, updatedBy: userEmail, backupAt: 0 },
         }),
       ]);
